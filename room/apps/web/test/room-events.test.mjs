@@ -33,14 +33,20 @@ test('shares one connection, releases hidden tabs, and restores all channels whe
     stops.push(subscribeRoomEvents('one', 'a', listener('a')));
     stops.push(subscribeRoomEvents('one', 'b', listener('b')));
     stops.push(subscribeRoomEvents('one', 'maestro', listener('maestro')));
+    stops.push(subscribeRoomEvents('one', 'side-a', listener('side-a')));
+    stops.push(subscribeRoomEvents('one', 'workflow', listener('workflow')));
     assert.equal(sources.length, 1);
     sources[0].send('a', 'A snapshot');
     sources[0].send('b', 'B snapshot');
     sources[0].send('maestro', 'Maestro snapshot');
+    sources[0].send('side-a', 'Private side snapshot');
+    sources[0].send('workflow', 'Workflow invalidation');
     assert.deepEqual(received, [
       ['a', 'A snapshot'],
       ['b', 'B snapshot'],
       ['maestro', 'Maestro snapshot'],
+      ['side-a', 'Private side snapshot'],
+      ['workflow', 'Workflow invalidation'],
     ]);
     document.hidden = true;
     document.dispatchEvent(new Event('visibilitychange'));
