@@ -4,6 +4,11 @@ The root MIT license covers original arena code and documentation. Third-party
 material keeps its existing license and attribution. Keep the notices with copies
 of that material.
 
+- The unmodified shadcn 4.22.1 Tailwind stylesheet is retained as
+  `room/apps/web/src/vendor/shadcn-tailwind.css` and in the bundled scaffold's
+  matching path. Each copy has the upstream MIT notice in `shadcn-LICENSE.md`.
+  Its SHA-256 is
+  `4c371f7a1ff5d219ae2f7ff28bd256b4346fd546fe46fbae22092e57db2f0fae`.
 - Theme presets derived from tweakcn retain the Apache License 2.0 text in
   `room/apps/web/src/themes/LICENSE-tweakcn`.
 - Bundled web fonts retain their notices in

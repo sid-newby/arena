@@ -51,7 +51,7 @@ limits.
 
 | Package area | Stack                             | Manifest versions                                |
 | ------------ | --------------------------------- | ------------------------------------------------ |
-| Web          | React, Vite, Tailwind CSS, shadcn | `^19.3.1`, `^8.3.5`, `^4.3.3`, `^4.22.1`         |
+| Web          | React, Vite, Tailwind CSS, @shadcn/react | `^19.3.1`, `^8.3.5`, `^4.3.3`, `^0.3.1`         |
 | API          | NestJS, Vitest                    | `^12.2.0`, `^5.0.5`                              |
 | Workspace    | TypeScript, Oxc lint, Oxc format  | web `^7.0.2`, API `^6.0.3`, `^1.89.0`, `^0.74.0` |
 
@@ -194,7 +194,7 @@ The workspace keeps a 24-hour package release quarantine
 (`minimumReleaseAge: 1440`), requires explicit approval for dependency build
 scripts (`strictDepBuilds: true`, empty `allowBuilds`), enforces supported Node
 versions (`engineStrict: true`), rejects trust downgrades, and blocks exotic
-transitive sources. `semver@6.3.1` is the single trust-policy exception. NestJS
+transitive sources. NestJS
 12.2.0 currently pins Multer 2.4.0, so the workspace overrides that dependency
 to 2.5.0 for [GHSA-q7qp-rjg7-q26m](https://github.com/advisories/GHSA-q7qp-rjg7-q26m).
 Recheck and remove the override when Nest includes a fixed version.
@@ -243,3 +243,8 @@ Publish from a reviewed Git commit. The working folder contains ignored local
 credentials, conversations, and agent workspaces. Do not upload the working folder
 as a ZIP or force-add ignored files. Existing `lilbits` package names, browser
 storage keys, and local state paths remain internal compatibility identifiers.
+
+The `shadcn` CLI is not installed. Existing generated components and the separate
+`@shadcn/react` message scroller remain available. The app uses a pinned local
+copy of the CLI package's Tailwind utilities, with its MIT notice, so those styles
+do not require the CLI dependency tree.

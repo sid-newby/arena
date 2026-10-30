@@ -5,7 +5,6 @@
 ![React](https://img.shields.io/badge/React-19.3.1-61DAFB?logo=react&logoColor=black)
 ![NestJS](https://img.shields.io/badge/NestJS-12.2.0-E0234E?logo=nestjs&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.3.3-06B6D4?logo=tailwindcss&logoColor=white)
-![shadcn/ui](https://img.shields.io/badge/shadcn%2Fui-4.22.1-000000?logo=shadcnui&logoColor=white)
 ![oxlint](https://img.shields.io/badge/oxlint-1.89.0-32F3E9)
 ![oxfmt](https://img.shields.io/badge/oxfmt-0.74.0-32F3E9)
 
@@ -131,7 +130,6 @@ Versions are the manifest entries. Every one of them resolved to `@latest` at sc
 | @vitejs/plugin-react                            | `apps/web/package.json`                 | `^6.1.2`   |
 | React / React DOM                               | `apps/web/package.json`                 | `^19.3.1`  |
 | tailwindcss / @tailwindcss/vite                 | `apps/web/package.json`                 | `^4.3.3`   |
-| shadcn                                          | `apps/web/package.json`                 | `^4.22.1`  |
 | @nestjs/common, core, platform-express, testing | `apps/api/package.json`                 | `^12.2.0`  |
 | @nestjs/cli / @nestjs/schematics                | `apps/api/package.json`                 | `^12.0.10` |
 | Vitest / @vitest/coverage-v8                    | `apps/api/package.json`                 | `^5.0.5`   |
@@ -160,7 +158,6 @@ All settings live in `pnpm-workspace.yaml`:
 | `strictDepBuilds`    | `true`         | An unreviewed build script fails the install (`ERR_PNPM_IGNORED_BUILDS`) instead of only printing a warning                         |
 | `engineStrict`       | `true`         | Refuses to install packages whose `engines` exclude the running Node                                                                |
 | `trustPolicy`        | `no-downgrade` | Fails if a version is published with weaker trust evidence (for example, no provenance) than an earlier version of the same package |
-| `trustPolicyExclude` | `semver@6.3.1` | Exempts one known-good release, pulled in by Babel through `shadcn`, that the no-downgrade check rejects                            |
 | `blockExoticSubdeps` | `true`         | Transitive dependencies may not resolve from git URLs or raw tarballs                                                               |
 
 **Quarantine vs `@latest`.** With a 24h `minimumReleaseAge`, `pnpm add <pkg>@latest` installs the newest version that is at least a day old. That can be one patch behind npm's `latest` dist-tag. This is intentional. A waiting period gives the registry and the community time to spot and unpublish a compromised release before it reaches this repository, though no window guarantees that. Lower or raise the window in `pnpm-workspace.yaml` if you need to.
@@ -183,16 +180,17 @@ references and Radix notes. Those references are implementation guidance; the
 approved product design controls the visual direction. Immutable upstream
 reference code is excluded from application lint/format checks.
 
-shadcn/ui is configured in `apps/web/components.json` (style `radix-nova`, base color neutral, CSS variables). To add a component:
-
-```bash
-cd apps/web
-pnpm exec shadcn add <name>   # e.g. dialog, input, dropdown-menu; uses installed CLI
-```
+shadcn/ui component configuration remains in `apps/web/components.json`. The CLI
+is not installed because its dependency tree includes an unpatched advisory.
+Use existing local components. Review any future CLI installation and require a
+clean dependency audit before using it to add components.
 
 **The `cn` helper comes from npm.** In the `radix-nova` style, shadcn 4.22 installs the [`cn`](https://www.npmjs.com/package/cn) package and its components `import { cn } from "cn"`. They do not use a local `clsx` + `tailwind-merge` helper. `src/lib/utils.ts` just re-exports it. The package is published by the `shadcn` npm account from `github.com/shadcn-ui/cn`, with build provenance and no dependencies or install scripts, and `shadcn` itself depends on it. If you have code that relies on `tailwind-merge`'s exact conflict-resolution behaviour, test it against `cn` before you assume parity.
 
-**`shadcn` is a runtime dependency.** `src/index.css` imports `shadcn/tailwind.css`, so the CLI package sits in `dependencies`. Vite bundles only that CSS, but the CLI's install tree (Babel and others) is part of production installs and of `pnpm audit:prod`. That tree is also why `trustPolicyExclude` lists `semver@6.3.1`.
+The web app imports a pinned copy of the shadcn 4.22.1 Tailwind utilities from
+`apps/web/src/vendor/shadcn-tailwind.css`. Its upstream MIT notice is retained
+alongside it. The CLI package and its transitive dependencies are not installed.
+Keep the vendored stylesheet unchanged unless deliberately updating its source.
 
 Components land in `apps/web/src/components/ui/` and are imported through the `@` alias (`@/components/ui/<name>`). The CLI writes them in its own style, so oxlint and oxfmt skip that folder. Later `add` runs can't break `pnpm format:check`.
 

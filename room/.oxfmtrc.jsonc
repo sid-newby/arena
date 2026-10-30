@@ -8,6 +8,7 @@
     "**/node_modules/**",
     "pnpm-lock.yaml",
     "apps/web/src/components/ui/**",
+    "apps/web/src/vendor/**",
     "docs/ui-standards/upstream/**",
   ],
 }
