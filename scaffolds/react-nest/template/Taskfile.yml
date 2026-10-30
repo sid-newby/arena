@@ -1,0 +1,22 @@
+version: '3'
+
+tasks:
+  install:
+    desc: Install the locked dependencies.
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  checks:
+    desc: Lint, typecheck, test, and build the project.
+    cmds:
+      - pnpm lint
+      - pnpm typecheck
+      - pnpm test
+      - pnpm test:e2e
+      - pnpm build
+
+  dev:
+    desc: Start the web app and API.
+    interactive: true
+    cmds:
+      - pnpm dev

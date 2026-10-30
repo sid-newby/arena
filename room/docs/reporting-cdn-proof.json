@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "testedDate": "2026-10-30",
+  "purpose": "Planning compatibility probe with synthetic data, not model performance evidence",
+  "dependencies": [
+    {
+      "name": "react.js",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js",
+      "status": 200,
+      "bytes": 10751,
+      "integrity": "sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
+    },
+    {
+      "name": "react-dom.js",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js",
+      "status": 200,
+      "bytes": 131835,
+      "integrity": "sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
+    },
+    {
+      "name": "react-is.js",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/react-is/18.3.1/umd/react-is.production.min.js",
+      "status": 200,
+      "bytes": 2310,
+      "integrity": "sha384-XYVQ7LtYqgha4ByzNRLR6NHo9p0yVDvmTNuQkiIweU0U8WqLWBkH1L771VlP6fYx"
+    },
+    {
+      "name": "Recharts.js",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/recharts/3.10.1/Recharts.js",
+      "bytes": 593114,
+      "integrity": "sha384-B2qLloNSIrxapii5UnBrm+3aDNWhVlmIFQONXg13tES0lEd7YUzh6lrjD3WSiwZ1"
+    }
+  ],
+  "browserChecks": {
+    "documentProtocol": "file:",
+    "online": {
+      "React": "18.3.1",
+      "ReactDOM": true,
+      "ReactIs": true,
+      "Recharts": true,
+      "renderedSvgCharts": 1
+    },
+    "offline": {
+      "networkMode": "Offline",
+      "reloadIgnoredCache": true,
+      "renderedSvgCharts": 0,
+      "fallbackSummaryVisible": true,
+      "fallbackTableVisible": true,
+      "fallbackValues": [
+        {
+          "label": "Model X",
+          "outputTokens": 800
+        },
+        {
+          "label": "Model Y",
+          "outputTokens": 1200
+        }
+      ]
+    }
+  },
+  "basecoatInspection": {
+    "version": "1.1.0",
+    "url": "https://cdn.jsdelivr.net/npm/basecoat-css@1.1.0/dist/basecoat.cdn.min.css",
+    "status": 200,
+    "bytes": 236766,
+    "sha256": "e6354ef1e99adc94257e579507f18cb00307a08cc2b976deb320368eb7c28e70",
+    "matchingTokenNames": [
+      "background",
+      "foreground",
+      "radius",
+      "font-sans"
+    ]
+  },
+  "notYetVerified": [
+    "Complete Black Lacquer visual match",
+    "Basecoat component subset build",
+    "Sandboxed app report preview",
+    "Actual reporting metric generation",
+    "Production-scale performance"
+  ],
+  "sources": [
+    "https://github.com/recharts/recharts/blob/v3.10.1/package.json",
+    "https://basecoatui.com/installation/",
+    "https://basecoatui.com/customization/",
+    "https://franken-ui.dev/docs/2.1/installation"
+  ]
+}

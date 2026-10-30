@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "resources": {
+    "./agents/builder-agent.md": {
+      "kind": "agent",
+      "id": "agent_019PeNvASLcTGf3nJKfk9ooT",
+      "version": "1",
+      "hash": ""
+    }
+  }
+}

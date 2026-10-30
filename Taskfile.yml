@@ -1,0 +1,49 @@
+version: '3'
+
+tasks:
+  narration:eval:
+    desc: Evaluate subscribed model narration using a fake Cartesia connection.
+    dir: '{{.ROOT_DIR}}/room'
+    cmds:
+      - pnpm --filter @bay01/api build
+      - node scripts/evaluate-narration.mjs
+
+  install:
+    desc: Install the room's locked dependencies.
+    dir: '{{.ROOT_DIR}}/room'
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  checks:
+    desc: Lint, typecheck, test, and build the application.
+    dir: '{{.ROOT_DIR}}/room'
+    env:
+      ROOM_SANDBOX_TESTS: '1'
+    cmds:
+      - pnpm lint
+      - pnpm typecheck
+      - pnpm test
+      - pnpm test:e2e
+      - pnpm build
+
+  dev:
+    desc: Start the room with A/B speech.
+    dir: '{{.ROOT_DIR}}/room'
+    interactive: true
+    cmds:
+      - pnpm dev
+
+  dev:text:
+    desc: Start the room without Cartesia or GCP access.
+    dir: '{{.ROOT_DIR}}/room'
+    interactive: true
+    cmds:
+      - pnpm dev:text
+
+  reports:scale:
+    desc: Measure deterministic report fixtures at 10, 100, and 1000 runs.
+    dir: '{{.ROOT_DIR}}/room'
+    cmds:
+      - pnpm --filter @lilbits/reporting build
+      - node packages/reporting/scripts/measure-scale.mjs
+      - node packages/reporting/scripts/verify-render-scale.mjs

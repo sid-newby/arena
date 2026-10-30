@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "themeSource": "apps/web/src/index.css :root",
+  "themeAdapterHash": "9a94f3c5583188827140c0077a855e8a72bbf3be68349e0a8656b5690d1b96aa",
+  "cssHash": "e49be19459a9ed0ccf499d8d7cba73aa0482b84f52f63ea448bced20ceec327a",
+  "basecoat": {
+    "version": "1.1.0",
+    "source": "https://registry.npmjs.org/basecoat-css/-/basecoat-css-1.1.0.tgz",
+    "sourceCssSha256": "b5248d98a96a9be7effd69495a503295710f78473ddb4c8842fb1ca68c616758",
+    "subsetSha256": "a5abde9795725c7f9722d6aac5a2f435896869b05720824f202a95d52a0dfaaa",
+    "components": ["table"],
+    "license": "MIT"
+  },
+  "fonts": {
+    "source": "apps/web/public/fonts",
+    "license": "OFL-1.1",
+    "files": ["geist-0.ttf", "barlow-condensed-2.ttf"]
+  },
+  "dependencies": [
+    {
+      "name": "react.js",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js",
+      "integrity": "sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
+    },
+    {
+      "name": "react-dom.js",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js",
+      "integrity": "sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
+    },
+    {
+      "name": "react-is.js",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/react-is/18.3.1/umd/react-is.production.min.js",
+      "integrity": "sha384-XYVQ7LtYqgha4ByzNRLR6NHo9p0yVDvmTNuQkiIweU0U8WqLWBkH1L771VlP6fYx"
+    },
+    {
+      "name": "Recharts.js",
+      "url": "https://cdnjs.cloudflare.com/ajax/libs/recharts/3.10.1/Recharts.js",
+      "integrity": "sha384-B2qLloNSIrxapii5UnBrm+3aDNWhVlmIFQONXg13tES0lEd7YUzh6lrjD3WSiwZ1"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+.speech-controls {
+  display: grid;
+  gap: 3px;
+  max-width: 460px;
+}
+.speech-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.speech-feedback {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.speech-controls [data-slot='button'] {
+  cursor: pointer;
+}
+.speech-controls [data-slot='button']:disabled {
+  cursor: not-allowed;
+}
+.speech-controls button[aria-pressed='true'] {
+  color: var(--foreground);
+  background: var(--accent);
+}
+@media (max-width: 700px) {
+  .speech-controls {
+    max-width: 310px;
+  }
+}

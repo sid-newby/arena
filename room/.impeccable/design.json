@@ -1,0 +1,530 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-30T12:46:02.880362+00:00",
+  "title": "Design System: lilbits",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Background",
+        "canonical": "oklch(0.16 0.004 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.004 260)",
+          "oklch(0.26 0.004 260)",
+          "oklch(0.38 0.004 260)",
+          "oklch(0.49 0.004 260)",
+          "oklch(0.61 0.004 260)",
+          "oklch(0.72 0.004 260)",
+          "oklch(0.84 0.004 260)",
+          "oklch(0.95 0.004 260)"
+        ]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Foreground",
+        "canonical": "oklch(0.94 0.005 90)",
+        "tonalRamp": [
+          "oklch(0.15 0.005 90)",
+          "oklch(0.26 0.005 90)",
+          "oklch(0.38 0.005 90)",
+          "oklch(0.49 0.005 90)",
+          "oklch(0.61 0.005 90)",
+          "oklch(0.72 0.005 90)",
+          "oklch(0.84 0.005 90)",
+          "oklch(0.95 0.005 90)"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Card",
+        "canonical": "oklch(0.105 0.003 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.003 260)",
+          "oklch(0.26 0.003 260)",
+          "oklch(0.38 0.003 260)",
+          "oklch(0.49 0.003 260)",
+          "oklch(0.61 0.003 260)",
+          "oklch(0.72 0.003 260)",
+          "oklch(0.84 0.003 260)",
+          "oklch(0.95 0.003 260)"
+        ]
+      },
+      "card-foreground": {
+        "role": "neutral",
+        "displayName": "Card Foreground",
+        "canonical": "oklch(0.94 0.005 90)",
+        "tonalRamp": [
+          "oklch(0.15 0.005 90)",
+          "oklch(0.26 0.005 90)",
+          "oklch(0.38 0.005 90)",
+          "oklch(0.49 0.005 90)",
+          "oklch(0.61 0.005 90)",
+          "oklch(0.72 0.005 90)",
+          "oklch(0.84 0.005 90)",
+          "oklch(0.95 0.005 90)"
+        ]
+      },
+      "popover": {
+        "role": "neutral",
+        "displayName": "Popover",
+        "canonical": "oklch(0.19 0.004 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.004 260)",
+          "oklch(0.26 0.004 260)",
+          "oklch(0.38 0.004 260)",
+          "oklch(0.49 0.004 260)",
+          "oklch(0.61 0.004 260)",
+          "oklch(0.72 0.004 260)",
+          "oklch(0.84 0.004 260)",
+          "oklch(0.95 0.004 260)"
+        ]
+      },
+      "popover-foreground": {
+        "role": "neutral",
+        "displayName": "Popover Foreground",
+        "canonical": "oklch(0.94 0.005 90)",
+        "tonalRamp": [
+          "oklch(0.15 0.005 90)",
+          "oklch(0.26 0.005 90)",
+          "oklch(0.38 0.005 90)",
+          "oklch(0.49 0.005 90)",
+          "oklch(0.61 0.005 90)",
+          "oklch(0.72 0.005 90)",
+          "oklch(0.84 0.005 90)",
+          "oklch(0.95 0.005 90)"
+        ]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Primary",
+        "canonical": "oklch(0.78 0.13 235)",
+        "tonalRamp": [
+          "oklch(0.15 0.13 235)",
+          "oklch(0.26 0.13 235)",
+          "oklch(0.38 0.13 235)",
+          "oklch(0.49 0.13 235)",
+          "oklch(0.61 0.13 235)",
+          "oklch(0.72 0.13 235)",
+          "oklch(0.84 0.13 235)",
+          "oklch(0.95 0.13 235)"
+        ]
+      },
+      "primary-foreground": {
+        "role": "neutral",
+        "displayName": "Primary Foreground",
+        "canonical": "oklch(0.12 0.01 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.01 260)",
+          "oklch(0.26 0.01 260)",
+          "oklch(0.38 0.01 260)",
+          "oklch(0.49 0.01 260)",
+          "oklch(0.61 0.01 260)",
+          "oklch(0.72 0.01 260)",
+          "oklch(0.84 0.01 260)",
+          "oklch(0.95 0.01 260)"
+        ]
+      },
+      "secondary": {
+        "role": "neutral",
+        "displayName": "Secondary",
+        "canonical": "oklch(0.23 0.006 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.006 260)",
+          "oklch(0.26 0.006 260)",
+          "oklch(0.38 0.006 260)",
+          "oklch(0.49 0.006 260)",
+          "oklch(0.61 0.006 260)",
+          "oklch(0.72 0.006 260)",
+          "oklch(0.84 0.006 260)",
+          "oklch(0.95 0.006 260)"
+        ]
+      },
+      "secondary-foreground": {
+        "role": "neutral",
+        "displayName": "Secondary Foreground",
+        "canonical": "oklch(0.92 0.004 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.004 260)",
+          "oklch(0.26 0.004 260)",
+          "oklch(0.38 0.004 260)",
+          "oklch(0.49 0.004 260)",
+          "oklch(0.61 0.004 260)",
+          "oklch(0.72 0.004 260)",
+          "oklch(0.84 0.004 260)",
+          "oklch(0.95 0.004 260)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "oklch(0.21 0.005 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.005 260)",
+          "oklch(0.26 0.005 260)",
+          "oklch(0.38 0.005 260)",
+          "oklch(0.49 0.005 260)",
+          "oklch(0.61 0.005 260)",
+          "oklch(0.72 0.005 260)",
+          "oklch(0.84 0.005 260)",
+          "oklch(0.95 0.005 260)"
+        ]
+      },
+      "muted-foreground": {
+        "role": "neutral",
+        "displayName": "Muted Foreground",
+        "canonical": "oklch(0.69 0.012 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.012 260)",
+          "oklch(0.26 0.012 260)",
+          "oklch(0.38 0.012 260)",
+          "oklch(0.49 0.012 260)",
+          "oklch(0.61 0.012 260)",
+          "oklch(0.72 0.012 260)",
+          "oklch(0.84 0.012 260)",
+          "oklch(0.95 0.012 260)"
+        ]
+      },
+      "accent": {
+        "role": "neutral",
+        "displayName": "Accent",
+        "canonical": "oklch(0.25 0.006 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.006 260)",
+          "oklch(0.26 0.006 260)",
+          "oklch(0.38 0.006 260)",
+          "oklch(0.49 0.006 260)",
+          "oklch(0.61 0.006 260)",
+          "oklch(0.72 0.006 260)",
+          "oklch(0.84 0.006 260)",
+          "oklch(0.95 0.006 260)"
+        ]
+      },
+      "accent-foreground": {
+        "role": "neutral",
+        "displayName": "Accent Foreground",
+        "canonical": "oklch(0.96 0.004 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.004 260)",
+          "oklch(0.26 0.004 260)",
+          "oklch(0.38 0.004 260)",
+          "oklch(0.49 0.004 260)",
+          "oklch(0.61 0.004 260)",
+          "oklch(0.72 0.004 260)",
+          "oklch(0.84 0.004 260)",
+          "oklch(0.95 0.004 260)"
+        ]
+      },
+      "destructive": {
+        "role": "secondary",
+        "displayName": "Destructive",
+        "canonical": "oklch(0.76 0.17 32)",
+        "tonalRamp": [
+          "oklch(0.15 0.17 32)",
+          "oklch(0.26 0.17 32)",
+          "oklch(0.38 0.17 32)",
+          "oklch(0.49 0.17 32)",
+          "oklch(0.61 0.17 32)",
+          "oklch(0.72 0.17 32)",
+          "oklch(0.84 0.17 32)",
+          "oklch(0.95 0.17 32)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border",
+        "canonical": "oklch(0.32 0.006 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.006 260)",
+          "oklch(0.26 0.006 260)",
+          "oklch(0.38 0.006 260)",
+          "oklch(0.49 0.006 260)",
+          "oklch(0.61 0.006 260)",
+          "oklch(0.72 0.006 260)",
+          "oklch(0.84 0.006 260)",
+          "oklch(0.95 0.006 260)"
+        ]
+      },
+      "input": {
+        "role": "neutral",
+        "displayName": "Input",
+        "canonical": "oklch(0.32 0.006 260)",
+        "tonalRamp": [
+          "oklch(0.15 0.006 260)",
+          "oklch(0.26 0.006 260)",
+          "oklch(0.38 0.006 260)",
+          "oklch(0.49 0.006 260)",
+          "oklch(0.61 0.006 260)",
+          "oklch(0.72 0.006 260)",
+          "oklch(0.84 0.006 260)",
+          "oklch(0.95 0.006 260)"
+        ]
+      },
+      "luna-identity": {
+        "role": "primary",
+        "displayName": "Luna Identity",
+        "canonical": "oklch(0.78 0.13 235)",
+        "tonalRamp": [
+          "oklch(0.15 0.13 235)",
+          "oklch(0.26 0.13 235)",
+          "oklch(0.38 0.13 235)",
+          "oklch(0.49 0.13 235)",
+          "oklch(0.61 0.13 235)",
+          "oklch(0.72 0.13 235)",
+          "oklch(0.84 0.13 235)",
+          "oklch(0.95 0.13 235)"
+        ]
+      },
+      "opus-identity": {
+        "role": "secondary",
+        "displayName": "Opus Identity",
+        "canonical": "oklch(0.73 0.17 45)",
+        "tonalRamp": [
+          "oklch(0.15 0.17 45)",
+          "oklch(0.26 0.17 45)",
+          "oklch(0.38 0.17 45)",
+          "oklch(0.49 0.17 45)",
+          "oklch(0.61 0.17 45)",
+          "oklch(0.72 0.17 45)",
+          "oklch(0.84 0.17 45)",
+          "oklch(0.95 0.17 45)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Agent names."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Empty-state statements."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Theme drawer heading."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Agent replies."
+      },
+      "input": {
+        "displayName": "Input",
+        "purpose": "Composer text; 16px on mobile."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Model/status and primary compact controls."
+      },
+      "metadata": {
+        "displayName": "Metadata",
+        "purpose": "Reply and utility labels."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Subordinate composer instructions."
+      }
+    },
+    "shadows": [
+      {
+        "name": "slab",
+        "value": "inset 1px 1px 0 color-mix(in oklch, var(--foreground), transparent 63%), inset -1px 0 0 color-mix(in oklch, var(--foreground), transparent 78%), 18px 28px 36px -18px color-mix(in oklch, var(--card), transparent 10%)",
+        "purpose": "Fine highlights and diffuse cast shadow on the lacquer face."
+      },
+      {
+        "name": "composer-recess",
+        "value": "inset 0 1px 8px color-mix(in oklch, var(--card), transparent 20%)",
+        "purpose": "Inset input depth."
+      },
+      {
+        "name": "theme-drawer",
+        "value": "-20px 0 70px rgb(0 0 0 / 0.4)",
+        "purpose": "Separate the theme dialog from its overlay."
+      }
+    ],
+    "motion": [
+      {
+        "name": "panel-pose",
+        "value": "transform 650ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Bounded agent-owned yaw."
+      },
+      {
+        "name": "working-spinner",
+        "value": "spin 1s linear infinite",
+        "purpose": "Submitting indicator."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "Collapse transitions and animations; remove panel rotation."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide-stage",
+        "value": "(min-width: 1600px)"
+      },
+      {
+        "name": "compact",
+        "value": "(max-width: 1000px)"
+      },
+      {
+        "name": "mobile-tabs",
+        "value": "(max-width: 700px)"
+      },
+      {
+        "name": "narrow-drawer",
+        "value": "(max-width: 480px)"
+      },
+      {
+        "name": "short-desktop",
+        "value": "(max-height: 760px) and (min-width: 701px)"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Send to Luna",
+      "kind": "button",
+      "refersTo": "button-send-luna",
+      "description": "Identity-colored composer action.",
+      "html": "<button class=\"ds-send-luna\">Send <svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M7 17 17 7M7 7h10v10\"/></svg></button>",
+      "css": ".ds-send-luna{display:inline-flex;align-items:center;gap:7px;height:31px;padding:0 11px;border:1px solid transparent;border-radius:0;background:var(--luna-identity, oklch(0.78 0.13 235));color:var(--card, oklch(0.105 0.003 260));font:500 11px var(--font-sans, \"Geist Variable\", sans-serif);cursor:pointer;transition:background 150ms;}.ds-send-luna:hover{background:color-mix(in oklch,var(--luna-identity, oklch(0.78 0.13 235)),var(--foreground, oklch(0.94 0.005 90)) 20%);}.ds-send-luna:focus-visible{outline:2px solid var(--primary, oklch(0.78 0.13 235));outline-offset:4px;}.ds-send-luna:active{transform:translateY(1px);}.ds-send-luna:disabled{opacity:.35;cursor:not-allowed;}"
+    },
+    {
+      "name": "Send to Opus",
+      "kind": "button",
+      "refersTo": "button-send-opus",
+      "description": "Identity-colored composer action.",
+      "html": "<button class=\"ds-send-opus\">Send <svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"M7 17 17 7M7 7h10v10\"/></svg></button>",
+      "css": ".ds-send-opus{display:inline-flex;align-items:center;gap:7px;height:31px;padding:0 11px;border:1px solid transparent;border-radius:0;background:var(--opus-identity, oklch(0.73 0.17 45));color:var(--card, oklch(0.105 0.003 260));font:500 11px var(--font-sans, \"Geist Variable\", sans-serif);cursor:pointer;transition:background 150ms;}.ds-send-opus:hover{background:color-mix(in oklch,var(--opus-identity, oklch(0.73 0.17 45)),var(--foreground, oklch(0.94 0.005 90)) 20%);}.ds-send-opus:focus-visible{outline:2px solid var(--primary, oklch(0.78 0.13 235));outline-offset:4px;}.ds-send-opus:active{transform:translateY(1px);}.ds-send-opus:disabled{opacity:.35;cursor:not-allowed;}"
+    },
+    {
+      "name": "Stop reply",
+      "kind": "button",
+      "refersTo": "button-stop",
+      "description": "Secondary composer action during a turn.",
+      "html": "<button class=\"ds-stop\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\"/></svg>Stop</button>",
+      "css": ".ds-stop{display:inline-flex;align-items:center;gap:7px;height:31px;padding:0 11px;border:1px solid transparent;border-radius:0;background:var(--secondary, oklch(0.23 0.006 260));color:var(--foreground, oklch(0.94 0.005 90));font:500 11px var(--font-sans, \"Geist Variable\", sans-serif);cursor:pointer;}.ds-stop:hover{background:color-mix(in oklch,var(--luna-identity, oklch(0.78 0.13 235)),var(--foreground, oklch(0.94 0.005 90)) 20%);}.ds-stop:focus-visible{outline:2px solid var(--primary, oklch(0.78 0.13 235));outline-offset:4px;}.ds-stop:active{transform:translateY(1px);}"
+    },
+    {
+      "name": "Ghost utility",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Compact footer utility with an explicit focus state.",
+      "html": "<button class=\"ds-ghost\">Recenter panels</button>",
+      "css": ".ds-ghost{height:26px;padding:0 6px;border:1px solid transparent;border-radius:0;background:transparent;color:var(--muted-foreground, oklch(0.69 0.012 260));font:500 10px var(--font-sans, \"Geist Variable\", sans-serif);cursor:pointer;}.ds-ghost:hover{color:var(--foreground, oklch(0.94 0.005 90));background:var(--accent, oklch(0.25 0.006 260));}.ds-ghost:focus-visible{outline:2px solid var(--primary, oklch(0.78 0.13 235));outline-offset:4px;}.ds-ghost:active{transform:translateY(1px);}"
+    },
+    {
+      "name": "Composer field",
+      "kind": "input",
+      "refersTo": "composer",
+      "description": "Inset field with identity focus and readable placeholder.",
+      "html": "<div class=\"ds-composer\"><textarea class=\"ds-textarea\" aria-label=\"Message Luna\" placeholder=\"Talk to Luna…\"></textarea></div>",
+      "css": ".ds-composer{border:1px solid var(--input, oklch(0.32 0.006 260));background:color-mix(in oklch,var(--card, oklch(0.105 0.003 260)),var(--foreground, oklch(0.94 0.005 90)) 2%);box-shadow:inset 0 1px 8px color-mix(in oklch,var(--card, oklch(0.105 0.003 260)),transparent 20%);}.ds-composer:focus-within{border-color:var(--luna-identity, oklch(0.78 0.13 235));box-shadow:0 0 0 1px var(--luna-identity, oklch(0.78 0.13 235));}.ds-textarea{width:calc(100% - 30px);min-height:78px;max-height:160px;padding:15px 15px 8px;border:0;border-radius:0;background:transparent;color:var(--foreground, oklch(0.94 0.005 90));font:14px/1.6 var(--font-sans, \"Geist Variable\", sans-serif);caret-color:var(--luna-identity, oklch(0.78 0.13 235));}.ds-textarea::placeholder{color:var(--muted-foreground, oklch(0.69 0.012 260));opacity:1;}.ds-textarea:focus-visible{outline:none;}"
+    },
+    {
+      "name": "Destination selector",
+      "kind": "chip",
+      "refersTo": "destination-selected",
+      "description": "Native radios for self or independent delivery to both.",
+      "html": "<fieldset class=\"ds-destination\"><legend class=\"ds-legend\">Send destination</legend><label class=\"ds-option\"><input class=\"ds-radio\" type=\"radio\" name=\"ds-destination\" checked><span class=\"ds-choice\">Luna</span></label><label class=\"ds-option\"><input class=\"ds-radio\" type=\"radio\" name=\"ds-destination\"><span class=\"ds-choice\">Both</span></label></fieldset>",
+      "css": ".ds-destination{display:flex;gap:1px;border:0;padding:0;margin:0;}.ds-legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}.ds-option{position:relative;cursor:pointer;}.ds-radio{position:absolute;width:1px;height:1px;opacity:0;}.ds-choice{display:block;padding:6px 9px;color:var(--muted-foreground, oklch(0.69 0.012 260));font:10px/1.4 var(--font-sans, \"Geist Variable\", sans-serif);}.ds-radio:checked+.ds-choice{background:var(--secondary, oklch(0.23 0.006 260));color:var(--secondary-foreground, oklch(0.92 0.004 260));}.ds-radio:focus-visible+.ds-choice{outline:2px solid var(--primary, oklch(0.78 0.13 235));outline-offset:2px;}"
+    },
+    {
+      "name": "Mobile agent tabs",
+      "kind": "nav",
+      "refersTo": "mobile-navigation",
+      "description": "Selected-agent navigation for narrow viewports.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\" aria-label=\"Agent\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">Luna</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\" tabindex=\"-1\">Opus</button></div>",
+      "css": ".ds-tabs{display:flex;gap:24px;height:38px;padding:0 22px;}.ds-tab{flex:1;background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;text-align:left;padding:0 0 10px;color:var(--muted-foreground, oklch(0.69 0.012 260));font:13px var(--font-sans, \"Geist Variable\", sans-serif);cursor:pointer;}.ds-tab[aria-selected=\"true\"]{color:var(--foreground, oklch(0.94 0.005 90));border-bottom-color:var(--primary, oklch(0.78 0.13 235));}.ds-tab:focus-visible{outline:2px solid var(--primary, oklch(0.78 0.13 235));outline-offset:4px;}"
+    },
+    {
+      "name": "Lacquer slab",
+      "kind": "card",
+      "refersTo": "lacquer-slab",
+      "description": "Square face, diagonal reflections and a thick side plane.",
+      "html": "<section class=\"ds-slab\"><div class=\"ds-side\" aria-hidden=\"true\"></div><div class=\"ds-face\"><h2 class=\"ds-agent-name\">Luna</h2><p class=\"ds-slab-copy\">A little possibility.</p></div></section>",
+      "css": ".ds-slab{position:relative;margin-right:20px;}.ds-face{position:relative;min-height:240px;padding:28px;overflow:hidden;border-radius:0;color:var(--foreground, oklch(0.94 0.005 90));background:linear-gradient(112deg,color-mix(in oklch,var(--card, oklch(0.105 0.003 260)),var(--foreground, oklch(0.94 0.005 90)) 8%) 0%,var(--card, oklch(0.105 0.003 260)) 21%,var(--card, oklch(0.105 0.003 260)) 64%,color-mix(in oklch,var(--card, oklch(0.105 0.003 260)),var(--foreground, oklch(0.94 0.005 90)) 4%) 81%,var(--card, oklch(0.105 0.003 260)) 81.2%);box-shadow:inset 1px 1px 0 color-mix(in oklch,var(--foreground, oklch(0.94 0.005 90)),transparent 63%),inset -1px 0 0 color-mix(in oklch,var(--foreground, oklch(0.94 0.005 90)),transparent 78%),18px 28px 36px -18px color-mix(in oklch,var(--card, oklch(0.105 0.003 260)),transparent 10%);}.ds-face:before{content:\"\";position:absolute;inset:0;pointer-events:none;background:linear-gradient(112deg,transparent 0 9%,color-mix(in oklch,var(--foreground, oklch(0.94 0.005 90)),transparent 94%) 9.1%,transparent 9.5% 73%,color-mix(in oklch,var(--foreground, oklch(0.94 0.005 90)),transparent 97%) 73.1%,transparent 87%);}.ds-side{position:absolute;left:100%;top:0;width:20px;height:100%;transform:skewY(35deg);transform-origin:left top;background:linear-gradient(90deg,color-mix(in oklch,var(--card, oklch(0.105 0.003 260)),var(--foreground, oklch(0.94 0.005 90)) 23%),var(--card, oklch(0.105 0.003 260)) 16%,color-mix(in oklch,var(--card, oklch(0.105 0.003 260)),var(--foreground, oklch(0.94 0.005 90)) 7%) 78%,color-mix(in oklch,var(--card, oklch(0.105 0.003 260)),var(--foreground, oklch(0.94 0.005 90)) 26%) 94%,var(--card, oklch(0.105 0.003 260)));}.ds-agent-name{margin:0 0 18px;font:600 72px/.9 var(--font-display, \"Barlow Condensed\", sans-serif);letter-spacing:-.025em;text-transform:uppercase;color:var(--luna-identity, oklch(0.78 0.13 235));}.ds-slab-copy{font:15px/1.8 var(--font-sans, \"Geist Variable\", sans-serif);}"
+    },
+    {
+      "name": "Agent reply",
+      "kind": "custom",
+      "refersTo": "reply",
+      "description": "Borderless prose with compact author and status metadata.",
+      "html": "<article class=\"ds-reply\"><div class=\"ds-meta\"><span class=\"ds-author\">Luna</span><span>Reply</span></div><p class=\"ds-reply-text\">A little room for big thoughts.</p></article>",
+      "css": ".ds-reply{width:100%;font-family:var(--font-sans, \"Geist Variable\", sans-serif);}.ds-meta{display:flex;justify-content:space-between;gap:16px;padding-bottom:14px;color:var(--muted-foreground, oklch(0.69 0.012 260));font-size:10px;}.ds-author{color:var(--luna-identity, oklch(0.78 0.13 235));}.ds-reply-text{margin:0;color:var(--foreground, oklch(0.94 0.005 90));font-size:15px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;}"
+    },
+    {
+      "name": "Theme preset",
+      "kind": "button",
+      "refersTo": "theme-preset",
+      "description": "Square theme choice with selected seam.",
+      "html": "<button class=\"ds-preset\" aria-pressed=\"true\"><span class=\"ds-swatches\" aria-hidden=\"true\"><i class=\"ds-swatch-background\"></i><i class=\"ds-swatch-primary\"></i></span>Black lacquer</button>",
+      "css": ".ds-preset{display:flex;align-items:center;gap:8px;min-height:44px;border:1px solid var(--border, oklch(0.32 0.006 260));padding:8px;border-radius:0;background:var(--background, oklch(0.16 0.004 260));color:var(--foreground, oklch(0.94 0.005 90));font:12px var(--font-sans, \"Geist Variable\", sans-serif);cursor:pointer;}.ds-preset:hover{background:var(--accent, oklch(0.25 0.006 260));color:var(--accent-foreground, oklch(0.96 0.004 260));}.ds-preset[aria-pressed=\"true\"]{border-color:var(--primary, oklch(0.78 0.13 235));}.ds-preset:focus-visible{outline:2px solid var(--primary, oklch(0.78 0.13 235));outline-offset:3px;}.ds-swatches{display:flex;}.ds-swatches i{width:8px;height:22px;}.ds-swatch-background{background:var(--background, oklch(0.16 0.004 260));}.ds-swatch-primary{background:var(--primary, oklch(0.78 0.13 235));}"
+    },
+    {
+      "name": "Panelist delivery",
+      "kind": "custom",
+      "description": "Recipient and delivery feedback below the canonical reply. Sending records an attempt; replied records recipient response completion.",
+      "html": "<div class=\"ds-peer\"><div class=\"ds-peer-meta\"><span>Luna</span><span>To Opus</span></div><p>Opus, what do you think?</p><p class=\"ds-peer-state\">Queued for Opus</p><button>Stop conversation</button></div>",
+      "css": ".ds-peer { font-family: Geist Variable, sans-serif; color: oklch(0.94 0.005 90); } .ds-peer p { font-size:15px; line-height:1.8; } .ds-peer .ds-peer-state,.ds-peer-meta { font-size:10px; line-height:1.5; color:oklch(0.69 0.012 260); } .ds-peer-meta { display:flex; flex-wrap:wrap; gap:16px; } .ds-peer button { border:0; border-radius:0; background:transparent; color:oklch(0.69 0.012 260); padding:0 6px; height:26px; font:inherit; font-size:10px; } .ds-peer button:focus-visible { outline:2px solid oklch(0.78 0.13 235); outline-offset:4px; }"
+    },
+    {
+      "name": "Saved report table",
+      "kind": "custom",
+      "description": "Static numeric tables in the standalone Basecoat report remain readable without chart libraries or JavaScript. The report document supplies the fixed Black Lacquer token adapter.",
+      "html": "<div class=\"ds-report-table-container\" role=\"region\" aria-label=\"Example report measurements\" tabindex=\"0\"><table class=\"ds-report-table\"><caption>Illustrative report table</caption><thead><tr><th scope=\"col\">Model</th><th scope=\"col\">Complete tokens</th><th scope=\"col\">Unknown usage</th></tr></thead><tbody><tr><th scope=\"row\">Example model</th><td>300</td><td>0</td></tr></tbody></table></div>",
+      "css": ".ds-report-table-container {\n  overflow: auto;\n  max-height: 560px;\n  scrollbar-gutter: stable;\n  border: 1px solid var(--border);\n  margin-top: 16px;\n  outline-offset: 3px;\n}\n.ds-report-table {\n  border-collapse: collapse;\n  font-size: 12px;\n  line-height: 1.5;\n  min-width: 540px;\n}\n.ds-report-table th,\n.ds-report-table td {\n  padding: 12px 14px;\n  text-align: left;\n  vertical-align: top;\n  white-space: normal;\n}\n.ds-report-table thead th {\n  color: var(--muted-foreground);\n  font-weight: 500;\n  position: sticky;\n  top: 0;\n  background: var(--card);\n  z-index: 1;\n}\n.ds-report-table td {\n  font-variant-numeric: tabular-nums;\n}\n.ds-report-table td:first-child {\n  font-weight: 500;\n  max-width: 300px;\n  overflow-wrap: anywhere;\n}\n.ds-report-table tr {\n  border-bottom: 1px solid var(--border);\n}\n.ds-report-table tbody tr:hover {\n  background: var(--secondary);\n}\n.ds-report-table caption {\n  padding: 10px 14px;\n  text-align: left;\n  color: var(--muted-foreground);\n  font-size: 11px;\n}\n"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lacquer Room",
+    "overview": "Two physical, glossy black terminals occupy a quiet room. Square-cut edges, thick side faces and narrow reflected light make the conversations feel housed in objects. Condensed Neo Tokyo signage carries the agents’ names; calm reading type keeps their replies usable. The approved appearance is the default, and additions should continue it.\n\nLuna and Opus remain distinct colleagues with blue OpenAI and orange Anthropic identities. Optional color and font presets change the room’s styling while preserving its material construction, independent conversations and square corners. The shipped surface uses CSS geometry and reflections with supplied SVG provider masks; it has no shipping raster artwork.",
+    "keyCharacteristics": [
+      "Thick black lacquer with sharp reflections and visible side faces.",
+      "Oversized condensed names paired with quiet, readable replies.",
+      "Blue Luna and orange Opus identities retained across optional themes.",
+      "Two independent desktop panels and one tab-selected panel on mobile.",
+      "Bounded agent-owned motion with a front-facing reduced-motion fallback."
+    ],
+    "rules": [
+      {
+        "name": "The Identity Rule",
+        "body": "Provider identity colors stay blue for Luna and orange for Opus across presets; theme accents must not overwrite them.",
+        "section": "colors"
+      },
+      {
+        "name": "The Reading Rule",
+        "body": "Use the condensed display face for names and empty-state headlines; keep replies and controls in the conversation face.",
+        "section": "typography"
+      },
+      {
+        "name": "The Lacquer Rule",
+        "body": "Build depth from the slab face, side face, fine reflected light and a diffuse cast shadow. Preserve the black lacquer default.",
+        "section": "elevation"
+      },
+      {
+        "name": "Panelist delivery",
+        "body": "One saved reply body supplies display, speech and explicit peer input. Recipient metadata precedes text. Queue, sending and replied are distinct states. Stop conversation stops model turns, backlog and local audio; Stop audio only stops playback.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do preserve the approved lacquer default when adding optional themes.",
+      "Do use the existing semantic CSS variables and shadcn/Radix composition.",
+      "Do keep provider identities distinct and corners square across themes.",
+      "Do retain independent reply scrolling and anchored composers.",
+      "Do show connection, failure, preview and working states truthfully.",
+      "Do let every subsequent agent pose call supersede a human suggestion, even when the requested pose repeats.",
+      "Do keep keyboard focus visible and render reduced-motion panels front-facing."
+    ],
+    "donts": [
+      "Don’t replace the approved appearance with a new visual direction.",
+      "Don’t add rounded cards or pill controls.",
+      "Don’t turn reflections into raster backgrounds or obscure text with them.",
+      "Don’t use condensed display typography for conversation paragraphs.",
+      "Don’t show human prompts as visible reply bubbles or imply Both connects the agents to each other.",
+      "Don’t turn a manual pose suggestion into a persistent lock or present future voice as working."
+    ]
+  }
+}

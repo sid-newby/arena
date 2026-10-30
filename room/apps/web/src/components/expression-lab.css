@@ -1,0 +1,60 @@
+.expression-lab {
+  position: fixed;
+  z-index: 20;
+  right: 22px;
+  bottom: 60px;
+  max-width: min(360px, calc(100vw - 44px));
+  border: 1px solid var(--border);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: 11px;
+  max-height: calc(100svh - 160px);
+  overflow-y: auto;
+}
+.expression-lab summary {
+  cursor: pointer;
+  padding: 10px 14px;
+}
+.expression-lab-body {
+  display: grid;
+  gap: 12px;
+  padding: 4px 14px 14px;
+}
+.expression-lab label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.expression-lab select {
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--input);
+  min-height: 32px;
+  padding: 4px 8px;
+}
+.expression-lab input {
+  accent-color: var(--primary);
+}
+.expression-lab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.expression-lab output {
+  color: var(--muted-foreground);
+  line-height: 1.5;
+}
+.expression-lab-activity {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.expression-lab-activity legend {
+  padding-block: 6px;
+  color: var(--muted-foreground);
+}
+@media (max-width: 700px) {
+  .expression-lab {
+    bottom: 84px;
+  }
+}

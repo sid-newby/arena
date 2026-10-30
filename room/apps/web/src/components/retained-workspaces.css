@@ -1,0 +1,50 @@
+.retained-workspaces {
+  display: grid;
+  gap: 0.75rem;
+}
+.retained-workspaces-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.retained-workspaces h3,
+.retained-workspaces p {
+  margin: 0;
+}
+.retained-workspaces ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.retained-workspaces li {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.retained-workspaces code {
+  overflow-wrap: anywhere;
+}
+.retained-workspaces li button {
+  justify-self: start;
+}
+.workspace-closeout {
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+.workspace-closeout label {
+  line-height: 1.5;
+}
+.workspace-closeout input[type='checkbox'] {
+  margin-right: 0.5rem;
+}
+.workspace-closeout details ul {
+  max-height: 12rem;
+  overflow: auto;
+}

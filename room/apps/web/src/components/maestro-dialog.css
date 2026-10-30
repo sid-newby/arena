@@ -1,0 +1,217 @@
+.maestro-trigger-working {
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+}
+.maestro-trigger[data-unread] {
+  box-shadow:
+    0 0 0 1px #e3b341,
+    0 0 14px color-mix(in srgb, #e3b341 65%, transparent);
+}
+.maestro-overlay {
+  backdrop-filter: blur(3px);
+}
+.maestro-dialog {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  z-index: 71;
+  display: flex;
+  flex-direction: column;
+  width: min(780px, calc(100vw - 48px));
+  height: min(760px, calc(100dvh - 48px));
+  min-height: 0;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    112deg,
+    var(--card),
+    color-mix(in oklch, var(--card), var(--foreground) 3%)
+  );
+  color: var(--foreground);
+  box-shadow: 0 24px 80px color-mix(in oklch, var(--background), transparent 20%);
+  font-family: var(--font-body, var(--font-sans));
+}
+.maestro-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 26px 30px 0;
+}
+.maestro-heading h2 {
+  font-family: var(--font-display, var(--font-heading));
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  text-transform: uppercase;
+}
+.maestro-model {
+  margin-top: 9px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.maestro-description {
+  margin: 16px 30px 0;
+  max-width: 62ch;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.maestro-state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  min-height: 44px;
+  margin: 16px 30px 0;
+  padding-block: 8px;
+  border-block: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.maestro-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.maestro-connection i {
+  width: 5px;
+  height: 5px;
+  background: var(--muted-foreground);
+}
+.maestro-connection[data-connected] i {
+  background: var(--foreground);
+}
+.maestro-newer {
+  color: var(--foreground);
+}
+.maestro-state button {
+  margin-left: auto;
+}
+.maestro-thread {
+  flex: 1;
+}
+.maestro-messages {
+  padding: 26px 30px;
+  gap: 28px;
+}
+.maestro-message header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-bottom: 8px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.maestro-message header > :first-child {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.maestro-message > p {
+  font-size: 14px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.maestro-message .reply-markdown {
+  font-size: 14px;
+  line-height: 1.8;
+}
+.maestro-message[data-author='user'] {
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+.maestro-empty {
+  padding-block: 24px;
+  max-width: 48ch;
+}
+.maestro-empty h3 {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.maestro-empty p {
+  margin-top: 12px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.maestro-jump {
+  border: 1px solid var(--border);
+}
+.maestro-composer {
+  flex-shrink: 0;
+  padding: 16px 30px 24px;
+  border-top: 1px solid var(--border);
+}
+.maestro-composer textarea {
+  min-height: 78px;
+  max-height: 180px;
+  resize: none;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.maestro-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.maestro-actions p {
+  flex: 1;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.maestro-actions button {
+  min-width: 72px;
+}
+.maestro-error {
+  margin-bottom: 10px;
+  color: var(--destructive);
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media (max-width: 700px) {
+  .maestro-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100dvh - 16px);
+  }
+  .maestro-heading {
+    padding: 20px 20px 0;
+  }
+  .maestro-description {
+    margin-inline: 20px;
+  }
+  .maestro-state {
+    margin-inline: 20px;
+  }
+  .maestro-messages {
+    padding: 22px 20px;
+  }
+  .maestro-composer {
+    padding: 14px 20px 20px;
+  }
+  .maestro-composer textarea {
+    font-size: 16px;
+    max-height: 130px;
+  }
+  .maestro-actions {
+    flex-wrap: wrap;
+  }
+  .maestro-actions p {
+    flex-basis: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .maestro-dialog *,
+  .maestro-dialog *::before,
+  .maestro-dialog *::after {
+    scroll-behavior: auto;
+    animation: none;
+    transition: none;
+  }
+}
