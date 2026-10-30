@@ -235,7 +235,9 @@ export function parseWorkflow(value: unknown, runId: string): WorkflowSnapshot {
     !record(value.seats) ||
     !Array.isArray(value.artifacts) ||
     typeof value.busy !== 'boolean' ||
-    (value.error !== undefined && typeof value.error !== 'string')
+    (value.error !== undefined && typeof value.error !== 'string') ||
+    (value.workspaceError !== undefined &&
+      (typeof value.workspaceError !== 'string' || !value.workspaceError.trim()))
   )
     throw new Error('The run returned an unreadable update. Reload its saved state.');
   const task = value.task === null ? null : parseTask(value.task);
@@ -263,7 +265,9 @@ export function parseWorkflow(value: unknown, runId: string): WorkflowSnapshot {
       seats: { a: { root: workspace.seats.a.root }, b: { root: workspace.seats.b.root } },
     };
   }
-  if (value.phase === 'ready' && workspaces?.state !== 'ready')
+  if (value.workspaceError !== undefined && workspaces !== null)
+    throw new Error('Unavailable workspaces cannot also be ready.');
+  if (value.phase === 'ready' && workspaces?.state !== 'ready' && !value.workspaceError)
     throw new Error('The run is not ready to start. Its workspaces need preparation.');
   return {
     runId,
@@ -276,6 +280,7 @@ export function parseWorkflow(value: unknown, runId: string): WorkflowSnapshot {
     busy: value.busy,
     retrySeats: parseRetrySeats(value.retrySeats),
     ...(value.error === undefined ? {} : { error: value.error }),
+    ...(value.workspaceError === undefined ? {} : { workspaceError: value.workspaceError }),
     ...(value.proposal === undefined ? {} : { proposal: parseProposal(value.proposal) }),
     ...(value.proposedSeats === undefined
       ? {}
@@ -348,6 +353,7 @@ export function cleanTask(task: TaskDraft): TaskDraft {
 export function canEditWorkflow(snapshot: WorkflowSnapshot): boolean {
   return (
     !snapshot.busy &&
+    !snapshot.workspaceError &&
     (snapshot.phase === 'draft' || snapshot.phase === 'ready' || snapshot.phase === 'failed')
   );
 }

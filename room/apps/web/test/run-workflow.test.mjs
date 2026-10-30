@@ -56,6 +56,24 @@ test('reads a reviewable source commit and keeps setup editable only before work
   assert.notEqual(result.artifacts[0], artifact);
 });
 
+test('reads saved outputs for relocated workspaces while preventing further edits', () => {
+  const moved = {
+    ...snapshot,
+    workspaces: null,
+    workspaceError: 'Open the original installation to manage these workspaces.',
+    error: 'An earlier workflow error.',
+  };
+  const result = parseWorkflow(moved, 'run-1');
+  assert.equal(result.workspaceError, moved.workspaceError);
+  assert.equal(result.error, moved.error);
+  assert.equal(result.phase, 'ready');
+  assert.deepEqual(result.artifacts, [artifact]);
+  assert.equal(canEditWorkflow(result), false);
+  assert.throws(() => parseWorkflow({ ...moved, workspaceError: '' }, 'run-1'));
+  assert.throws(() => parseWorkflow({ ...moved, workspaceError: true }, 'run-1'));
+  assert.throws(() => parseWorkflow({ ...moved, workspaces: snapshot.workspaces }, 'run-1'));
+});
+
 test('rejects another run, unsafe readiness, unresolved source, and invalid task phases', () => {
   for (const change of [
     { runId: 'run-2' },

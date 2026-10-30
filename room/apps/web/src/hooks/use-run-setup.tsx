@@ -325,6 +325,7 @@ export function useRunSetup({
   const stopping = stoppingScope === lease.current && Boolean(stoppingScope);
   const busy = Boolean(operation || visible?.busy || visible?.phase === 'preparing');
   const editable = Boolean(visible && canEditWorkflow(visible) && !operation);
+  const workspacesUnavailable = Boolean(visible?.workspaceError);
   const recoveryReady = Boolean(
     recovery && recovery.runId === runId && recovery.revision === visible?.revision,
   );
@@ -671,6 +672,10 @@ export function useRunSetup({
     action: 'prepare' | 'start' | 'compare' | 'discuss' | 'pause' | 'resume' | 'complete' | 'stop',
   ) {
     if (!visible) return;
+    if (visible.workspaceError && action !== 'stop' && action !== 'pause') {
+      setError(visible.workspaceError);
+      return;
+    }
     if ((action === 'prepare' || action === 'start') && (!preflightPassed || draft?.dirty)) {
       setError('Save the setup and pass preflight before continuing.');
       return;
@@ -937,6 +942,7 @@ export function useRunSetup({
       {notice && <output className="run-notice">{notice}</output>}
       {operation && <output className="run-notice">{operation}…</output>}
       {visible.error && <p className="run-error">{visible.error}</p>}
+      {visible.workspaceError && <output className="run-error">{visible.workspaceError}</output>}
       {changedElsewhere && (
         <p className="run-error">
           The saved run changed while you were editing. Your draft is preserved.{' '}
@@ -1107,7 +1113,9 @@ export function useRunSetup({
           <Button
             size="sm"
             variant="secondary"
-            disabled={busy || draft.dirty || checkingPreflight || !preflightPassed}
+            disabled={
+              workspacesUnavailable || busy || draft.dirty || checkingPreflight || !preflightPassed
+            }
             onClick={() => command('prepare')}
           >
             <FolderOpen />
@@ -1117,7 +1125,9 @@ export function useRunSetup({
         {visible.phase === 'ready' && (
           <Button
             size="sm"
-            disabled={busy || draft.dirty || checkingPreflight || !preflightPassed}
+            disabled={
+              workspacesUnavailable || busy || draft.dirty || checkingPreflight || !preflightPassed
+            }
             onClick={() => command('start')}
           >
             <Play />
@@ -1125,13 +1135,21 @@ export function useRunSetup({
           </Button>
         )}
         {visible.phase === 'awaiting-comparison' && (
-          <Button size="sm" disabled={busy} onClick={() => command('compare')}>
+          <Button
+            size="sm"
+            disabled={workspacesUnavailable || busy}
+            onClick={() => command('compare')}
+          >
             <ChevronRight />
             Compare outputs
           </Button>
         )}
         {visible.phase === 'comparison' && !visible.busy && (
-          <Button size="sm" disabled={busy} onClick={() => command('discuss')}>
+          <Button
+            size="sm"
+            disabled={workspacesUnavailable || busy}
+            onClick={() => command('discuss')}
+          >
             Open bounded discussion
           </Button>
         )}
@@ -1177,6 +1195,7 @@ export function useRunSetup({
               size="sm"
               variant="secondary"
               disabled={
+                workspacesUnavailable ||
                 Boolean(operation) ||
                 draft.dirty ||
                 !recoveryReady ||
@@ -1197,7 +1216,7 @@ export function useRunSetup({
             <Button
               size="sm"
               variant="ghost"
-              disabled={Boolean(operation)}
+              disabled={workspacesUnavailable || Boolean(operation)}
               onClick={() => command('complete')}
             >
               Complete run
@@ -1675,6 +1694,7 @@ export function useRunSetup({
           <Button
             size="sm"
             disabled={
+              workspacesUnavailable ||
               Boolean(operation) ||
               visible.proposal.status === 'applied' ||
               visible.proposal.revision !== visible.revision

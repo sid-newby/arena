@@ -25,7 +25,7 @@ import type { MaestroRunToolProvider } from '../maestro/maestro.service.js';
 import { CommandSandbox } from '../tools/command-sandbox.js';
 import { ToolBroker } from '../tools/tool-broker.js';
 import { parseProviderConfig } from '../runs/provider-config.js';
-import { WorkspaceManager } from '../workspaces/workspace-manager.js';
+import { WorkspaceLocationError, WorkspaceManager } from '../workspaces/workspace-manager.js';
 import { workspacePaths } from '../workspaces/workspace-paths.js';
 import { WorkspaceLifecycle } from '../workspaces/workspace-lifecycle.js';
 import { prepareScaffoldSeed } from '../scaffolds/scaffold-seed.js';
@@ -295,8 +295,15 @@ export class DebateService implements OnModuleDestroy {
   snapshot(runId: string): WorkflowSnapshot {
     this.reconcile(runId);
     const run = this.chat.run(runId),
-      record = this.workflows.read(runId),
+      record = this.workflows.read(runId);
+    let workspaces: ReturnType<WorkspaceManager['get']>;
+    let workspaceError: string | undefined;
+    try {
       workspaces = this.manager.get(runId);
+    } catch (error) {
+      if (!(error instanceof WorkspaceLocationError)) throw error;
+      workspaceError = error.message;
+    }
     return {
       runId,
       revision: run.revision,
@@ -316,6 +323,7 @@ export class DebateService implements OnModuleDestroy {
           ? this.unfinishedSeats(runId, record)
           : [],
       busy: this.chat.busy(runId),
+      ...(workspaceError ? { workspaceError } : {}),
       ...(record.proposedSeats ? { proposedSeats: record.proposedSeats } : {}),
       ...(record.error ? { error: record.error } : {}),
       ...(this.workflows.proposal(runId) ? { proposal: this.workflows.proposal(runId) } : {}),

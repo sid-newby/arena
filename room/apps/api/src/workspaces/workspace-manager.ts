@@ -12,10 +12,17 @@ import {
   chmodSync,
   readdirSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, relative } from 'node:path';
 import { projectPath } from './project-directory.js';
 
 export type WorkspaceSeat = 'a' | 'b';
+export class WorkspaceLocationError extends Error {
+  constructor() {
+    super(
+      'These workspaces belong to another application location. Open the original installation to manage them. Saved outputs remain available here.',
+    );
+  }
+}
 export interface WorkspaceSource {
   repository: string;
   revision: string;
@@ -244,6 +251,19 @@ export class WorkspaceManager {
     const configuredRoot = join(this.managedRoot, identifier(runId));
     const base =
       record(entries.a) && entries.a.root === join(legacyRoot, 'a') ? legacyRoot : configuredRoot;
+    if (
+      record(entries.a) &&
+      record(entries.b) &&
+      typeof entries.a.root === 'string' &&
+      typeof entries.b.root === 'string' &&
+      isAbsolute(entries.a.root) &&
+      normalize(entries.a.root) === entries.a.root &&
+      basename(dirname(entries.a.root)) === runId &&
+      entries.a.root === join(dirname(entries.a.root), 'a') &&
+      entries.b.root === join(dirname(entries.a.root), 'b') &&
+      entries.a.root !== join(base, 'a')
+    )
+      throw new WorkspaceLocationError();
     const readSeat = (seat: WorkspaceSeat): SeatWorkspace => {
       const entry = entries[seat];
       if (!record(entry) || entry.root !== join(base, seat))

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatService } from '../../../src/chat/chat.service.js';
@@ -87,6 +87,51 @@ describe('Reviewed debate lifecycle', () => {
     expect(value.phase).toBe('ready');
     return value;
   }
+  it('keeps saved outputs readable after the managed workspace location changes without adopting old paths', async () => {
+    debate.onModuleDestroy();
+    manager = new WorkspaceManager({
+      controlRoot: join(directory, 'control'),
+      managedRoot: join(directory, 'original-workspaces'),
+    });
+    debate = DebateService.forTest(chat, manager);
+    await ready();
+    const workspace = manager.workspace(runId, 'a');
+    writeFileSync(join(workspace.root, 'private.txt'), 'Keep this workspace intact.');
+    const artifact = manager.publish({
+      workspace,
+      turnId: 'saved-turn',
+      path: 'result.md',
+      content: Buffer.from('An immutable result.'),
+    });
+    store.runs.workflows.update(runId, { error: 'An earlier workflow error.' });
+    const manifest = join(manager.controlRoot, 'runs', runId, 'workspaces.json');
+    const originalManifest = readFileSync(manifest, 'utf8');
+    debate.onModuleDestroy();
+    manager = new WorkspaceManager({
+      controlRoot: manager.controlRoot,
+      managedRoot: join(directory, 'new-workspaces'),
+    });
+    debate = DebateService.forTest(chat, manager);
+    const snapshot = debate.snapshot(runId);
+    expect(snapshot.phase).toBe('ready');
+    expect(snapshot.task).toEqual(task);
+    expect(snapshot.workspaces).toBeNull();
+    expect(snapshot.workspaceError).toContain('another application location');
+    expect(snapshot.error).toBe('An earlier workflow error.');
+    expect(snapshot.artifacts).toContainEqual(expect.objectContaining({ id: artifact.id }));
+    expect(() => manager.workspace(runId, 'a')).toThrow('another application location');
+    expect(() => manager.retain(runId)).toThrow('another application location');
+    expect(readFileSync(manifest, 'utf8')).toBe(originalManifest);
+    expect(readFileSync(join(workspace.root, 'private.txt'), 'utf8')).toBe(
+      'Keep this workspace intact.',
+    );
+    const malformed = JSON.parse(originalManifest);
+    malformed.seats.b.root = join(directory, 'unexpected');
+    writeFileSync(manifest, JSON.stringify(malformed));
+    expect(() => debate.snapshot(runId)).toThrow(
+      'Workspace manifest root does not match its owner.',
+    );
+  });
   it('delivers one durable feedback event when both independent results finish', async () => {
     const value = await ready();
     await debate.start(runId, { expectedRevision: value.revision, requestId: 'feedback-start' });

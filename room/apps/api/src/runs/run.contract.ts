@@ -125,6 +125,7 @@ export interface WorkflowSnapshot {
   artifacts: ArtifactMetadata[];
   retrySeats: SeatId[];
   busy: boolean;
+  workspaceError?: string;
   error?: string;
   proposal?: ActionProposal;
   proposedSeats?: Record<SeatId, ProviderConfig>;
