@@ -70,6 +70,15 @@ const definitions: BrokerToolDefinition[] = [
     ),
   },
   {
+    name: 'publish_text_artifact',
+    description:
+      'Publish your completed text as an immutable artifact up to 256 KiB. Provide a relative output filename and text directly; no file-write tool or existing workspace file is needed. Available in analysis and build profiles. Does not edit workspace files or expose the artifact to the other seat during independent work.',
+    inputSchema: schema(
+      { path: pathProperty, text: { type: 'string' }, title: { type: 'string' } },
+      ['path', 'text'],
+    ),
+  },
+  {
     name: 'publish_artifact',
     description:
       'Publish an immutable snapshot of a workspace file up to 10 MiB. Publishing does not grant the other seat access during independent work.',
@@ -255,6 +264,24 @@ export class ToolBroker {
     const workspace = this.manager.workspace(request.runId, request.seat);
     if (request.name === 'run_command')
       return this.command(workspace, request.input, request.signal);
+    if (request.name === 'publish_text_artifact') {
+      const path = relativePath(text(request.input, 'path'));
+      const content = text(request.input, 'text', 256 * 1024);
+      if (!content.trim()) throw new Error('Provide non-empty artifact text.');
+      if (Buffer.byteLength(content) > 256 * 1024)
+        throw new Error('Artifact text exceeds 256 KiB.');
+      const title =
+        request.input.title === undefined ? undefined : text(request.input, 'title', 200);
+      return JSON.stringify(
+        this.manager.publish({
+          workspace,
+          turnId: request.turnId,
+          path,
+          title,
+          content: Buffer.from(content),
+        }),
+      );
+    }
     const payload: Record<string, unknown> = {
       root: workspace.root,
       action: request.name,

@@ -169,6 +169,8 @@ after independent outputs finish. A pause waits for the current output boundary;
 Stop aborts A/B work. Failed or interrupted candidates require deliberate retry.
 
 The analysis profile provides reading, search, listing, and immutable publication.
+Analysis seats can publish a text report directly without creating a workspace
+file. Existing workspace files can also be published.
 The build profile adds file edits and bounded commands. Containment currently
 requires macOS and fails closed elsewhere. Commands have network access, and agents
 can use web search and Context7 for research. Candidate artifacts retain their source and content
