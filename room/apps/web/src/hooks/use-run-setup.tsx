@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { api, parseRunReference } from '@/lib/agents';
 import { subscribeRoomEvents } from '@/lib/room-events';
 import { parseWorkflowInvalidation } from '@/lib/messaging';
+import { waitForMaestroTurn } from '@/lib/maestro';
 import {
   defaultTask,
   cleanTask,
@@ -610,49 +611,45 @@ export function useRunSetup({
           signal: scope.controller.signal,
         },
       );
-      for (let attempt = 0; attempt < 180; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        if (scope.controller.signal.aborted || lease.current !== scope) return;
-        const result = await api(
-          `${prefix}/${encodeURIComponent(created)}`,
-          (value) => {
-            if (!value || typeof value !== 'object' || !('status' in value))
-              throw new Error('Unreadable criteria result.');
-            return value;
-          },
-          { signal: scope.controller.signal },
+      await waitForMaestroTurn(runId, created, scope.controller.signal);
+      if (scope.controller.signal.aborted || lease.current !== scope) return;
+      const result = await api(
+        `${prefix}/${encodeURIComponent(created)}`,
+        (value) => {
+          if (!value || typeof value !== 'object' || !('status' in value))
+            throw new Error('Unreadable criteria result.');
+          return value;
+        },
+        { signal: scope.controller.signal },
+      );
+      if (result.status === 'failed')
+        throw new Error(
+          'error' in result && typeof result.error === 'string'
+            ? result.error
+            : 'Criteria generation failed.',
         );
-        if (result.status === 'working') continue;
-        if (result.status === 'failed')
-          throw new Error(
-            'error' in result && typeof result.error === 'string'
-              ? result.error
-              : 'Criteria generation failed.',
-          );
-        if (
-          result.status !== 'completed' ||
-          !('criteria' in result) ||
-          !Array.isArray(result.criteria) ||
-          !result.criteria.every((item: unknown) => typeof item === 'string')
-        )
-          throw new Error('Unreadable criteria result.');
-        if (
-          currentEditor.current?.runId !== runId ||
-          JSON.stringify(currentEditor.current.task) !== captured ||
-          currentEditor.current.baseRevision !== draft.baseRevision
-        ) {
-          setError('The setup changed while Maestro was working. Generate criteria again.');
-          return;
-        }
-        setCriteriaSuggestion({
-          runId,
-          task: captured,
-          revision: draft.baseRevision,
-          criteria: result.criteria,
-        });
+      if (
+        result.status !== 'completed' ||
+        !('criteria' in result) ||
+        !Array.isArray(result.criteria) ||
+        !result.criteria.every((item: unknown) => typeof item === 'string')
+      )
+        throw new Error('Unreadable criteria result.');
+      if (
+        currentEditor.current?.runId !== runId ||
+        JSON.stringify(currentEditor.current.task) !== captured ||
+        currentEditor.current.baseRevision !== draft.baseRevision
+      ) {
+        setError('The setup changed while Maestro was working. Generate criteria again.');
         return;
       }
-      throw new Error('Maestro is still working. Check the private chat for its response.');
+      setCriteriaSuggestion({
+        runId,
+        task: captured,
+        revision: draft.baseRevision,
+        criteria: result.criteria,
+      });
+      return;
     } catch (cause) {
       if (lease.current === scope && !scope.controller.signal.aborted)
         setError(cause instanceof Error ? cause.message : 'Could not generate criteria.');
