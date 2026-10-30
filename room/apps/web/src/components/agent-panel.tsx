@@ -570,7 +570,7 @@ export function AgentPanel({
               />
             </div>
             {!preview && visibleReceipts.length > 0 && (
-              <details className="saved-messages" open={pendingMessages.length > 0}>
+              <details className="saved-messages">
                 <summary>
                   {pendingMessages.length
                     ? `${pendingMessages.length} pending message${pendingMessages.length === 1 ? '' : 's'}`

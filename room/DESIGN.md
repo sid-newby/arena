@@ -283,6 +283,10 @@ and a 48px forward / -4° pitch lean. Audience is straight on. Turns settle over
 surfaces remain outside the clipped front face; chat clipping stays inside it.
 Panel colors and typography continue to inherit the existing theme. At tablet
 widths the existing display treatment uses a 64px heading to retain chat width.
+The transparent tabpanel wrappers pass pointer targeting to their slab children,
+including portions rotated behind the wrapper plane. Keyboard tabpanel focus is
+retained. `test/panel-hit-targets.browser.mjs` checks compositor hit targets across
+all poses and compact layouts without sending messages.
 
 The shared footer exposes Audience, Peer, Lean in, and Reset per agent plus
 Recenter panels. Manual poses are local visual state; genuine existing pose
@@ -308,6 +312,8 @@ busy; the button and caption state when it will queue or interrupt. A bounded
 receipt disclosure shows pending and recent messages, their authoritative delivery
 state, and cancellation for queued or unconfirmed work. Preview never sends or
 stops live conversation.
+The receipt disclosure starts collapsed. On narrow or short viewports, the reply
+thread retains at least 100px and the composer can scroll when receipts expand.
 
 Side conversation opens a separate Radix dialog per seat with the same square
 controls, local tokens, reply Markdown, and Message Scroller as Maestro. Its own
