@@ -893,7 +893,7 @@ export class DebateService implements OnModuleDestroy {
   private deliverFeedback() {
     const sender = this.feedbackSender;
     if (!sender || this.closed) return;
-    for (const event of this.workflows.pendingFeedback(Date.now())) {
+    for (const event of this.workflows.pendingFeedback(Date.now(), [...this.feedbackInFlight])) {
       if (this.feedbackInFlight.has(event.id)) continue;
       this.feedbackInFlight.add(event.id);
       void Promise.resolve()
@@ -910,18 +910,25 @@ export class DebateService implements OnModuleDestroy {
         )
         .finally(() => {
           this.feedbackInFlight.delete(event.id);
-          if (!this.closed && !this.feedbackRetry) {
-            this.feedbackRetry = setTimeout(
-              () => {
-                this.feedbackRetry = undefined;
-                this.deliverFeedback();
-              },
-              Math.min(300000, 5000 * 2 ** event.attempts),
-            );
-            this.feedbackRetry.unref();
-          }
+          this.deliverFeedback();
         });
     }
+    this.armFeedbackRetry();
+  }
+  private armFeedbackRetry() {
+    if (this.feedbackRetry) clearTimeout(this.feedbackRetry);
+    this.feedbackRetry = undefined;
+    if (this.closed || !this.feedbackSender) return;
+    const next = this.workflows.nextFeedbackAt([...this.feedbackInFlight]);
+    if (next === undefined) return;
+    this.feedbackRetry = setTimeout(
+      () => {
+        this.feedbackRetry = undefined;
+        this.deliverFeedback();
+      },
+      Math.max(0, next - Date.now()),
+    );
+    this.feedbackRetry.unref();
   }
   artifacts(runId: string): ArtifactMetadata[] {
     this.chat.run(runId);

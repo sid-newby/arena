@@ -146,6 +146,46 @@ describe('Reviewed debate lifecycle', () => {
     await settle();
     expect(send).toHaveBeenCalledTimes(1);
   });
+  it('wakes a persisted future feedback retry without any new room traffic', async () => {
+    vi.useFakeTimers();
+    try {
+      store.runs.workflows.update(runId, {}, 'workflow.candidate-failed');
+      const [event] = store.runs.workflows.pendingFeedback(Date.now());
+      store.runs.workflows.finishFeedback(event.id, false, 0, Date.now());
+      const send = vi.fn<() => Promise<void>>(async () => undefined);
+      debate.setFeedbackSender(send);
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(send).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(send).toHaveBeenCalledOnce();
+    } finally {
+      debate.onModuleDestroy();
+      vi.useRealTimers();
+    }
+  });
+  it('keeps scheduling the earliest persisted feedback deadline across mixed backoffs', async () => {
+    vi.useFakeTimers();
+    try {
+      const otherRun = chat.createRun().id;
+      store.runs.workflows.update(runId, {}, 'workflow.candidate-failed');
+      store.runs.workflows.update(otherRun, {}, 'workflow.candidate-failed');
+      const events = store.runs.workflows.pendingFeedback(Date.now());
+      expect(events).toHaveLength(2);
+      store.runs.workflows.finishFeedback(events[0].id, false, 0, Date.now());
+      store.runs.workflows.finishFeedback(events[1].id, false, 2, Date.now());
+      const send = vi.fn<() => Promise<void>>(async () => undefined);
+      debate.setFeedbackSender(send);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(send).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(14999);
+      expect(send).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      debate.onModuleDestroy();
+      vi.useRealTimers();
+    }
+  });
   it('reports exhausted feedback and retries it only on request', async () => {
     store.runs.workflows.update(runId, {}, 'workflow.candidate-failed');
     const [event] = store.runs.workflows.pendingFeedback(Date.now());

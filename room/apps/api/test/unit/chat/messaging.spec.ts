@@ -355,6 +355,37 @@ describe('Durable seat messages', () => {
   });
 });
 describe('Committed event delivery and restart', () => {
+  it('drains all initial and coalesced correspondence pages without a polling timer', async () => {
+    const store = new ChatStore(':memory:', '/tmp');
+    const runId = store.runs.currentId();
+    const binding = store.runs.binding(runId, 'a');
+    const runtime: AgentRuntime = {
+      info: { id: 'a', name: 'A', ...binding.config, runtime: 'fixture', status: 'ready' },
+      run: async () => {},
+    };
+    const chat = ChatService.forTest(store, { a: runtime, b: runtime }, '/tmp');
+    await settle();
+    for (let i = 0; i < 1201; i++) store.runs.append(runId, 'probe.initial', null, null, { i });
+    const initialThrough = store.runs.cursor(runId),
+      received: number[] = [];
+    let inserted = false;
+    const subscription = chat.correspondenceEvents(runId).subscribe(({ id }) => {
+      received.push(Number(id));
+      if (!inserted) {
+        inserted = true;
+        store.runs.append(runId, 'probe.live-during-replay', null, null, {});
+      }
+    });
+    expect(received).toEqual(Array.from({ length: initialThrough }, (_, i) => i + 1));
+    await settle();
+    expect(received).toEqual(Array.from({ length: initialThrough + 1 }, (_, i) => i + 1));
+    for (let i = 0; i < 1101; i++) store.runs.append(runId, 'probe.coalesced', null, null, { i });
+    await settle();
+    const through = store.runs.cursor(runId);
+    expect(received).toEqual(Array.from({ length: through }, (_, i) => i + 1));
+    subscription.unsubscribe();
+    await chat.onModuleDestroy();
+  });
   it('retains an earlier committed notification when the next transaction rolls back', async () => {
     const store = new ChatStore(':memory:', '/tmp');
     const first = store.runs.currentId(),
