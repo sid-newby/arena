@@ -5,7 +5,7 @@ import { SpeechQueue, SpeechTracker, SpeechInterruptions, type Speaker } from '@
 
 type Agents = Record<Speaker, AgentState>;
 export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
-  const playbackRun = useRef(runId);
+  const playbackRun = useRef({ id: runId, initialized: new Set<Speaker>() });
   const latest = useRef(agents);
   useEffect(() => {
     latest.current = agents;
@@ -24,22 +24,29 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
   const [feedback, setFeedback] = useState(false);
   const [status, setStatus] = useState('Speech off');
   const [error, setError] = useState<string>();
-  const baseline = useCallback(() => {
+  const baseline = useCallback((mode: 'all' | 'completed' = 'all') => {
     for (const agent of agentIds)
-      tracker.current.baseline(agent, latest.current[agent].snapshot.messages);
+      if (
+        !playbackRun.current.id ||
+        latest.current[agent].snapshot.runId === playbackRun.current.id
+      )
+        tracker.current.baseline(agent, latest.current[agent].snapshot.messages, mode);
   }, []);
-  const stop = useCallback(() => {
+  const cancelPlayback = useCallback(() => {
     lifecycle.current = {};
     testingRef.current = false;
     setTesting(false);
     setStarting(false);
+    queue.current?.stop();
+    setBusy(false);
+  }, []);
+  const stop = useCallback(() => {
+    cancelPlayback();
     setFeedback(true);
     baseline();
     interruptions.current.clear();
-    queue.current?.stop();
-    setBusy(false);
     setStatus('Audio stopped · waiting for new replies');
-  }, [baseline]);
+  }, [baseline, cancelPlayback]);
   const disable = useCallback(() => {
     stop();
     setEnabled(false);
@@ -91,25 +98,39 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
   );
   /* oxlint-disable react/set-state-in-effect -- Synchronize the external audio queue with authoritative connection/turn events. */
   useEffect(() => {
-    if (playbackRun.current !== runId) {
-      playbackRun.current = runId;
+    if (playbackRun.current.id !== runId) {
+      playbackRun.current = { id: runId, initialized: new Set() };
       tracker.current = new SpeechTracker();
-      disable();
-      return;
+      interruptions.current.clear();
+      cancelPlayback();
+      setError(undefined);
+      setStatus(enabled ? 'Waiting for new replies' : 'Speech off');
     }
-    const aInterrupted = interruptions.current.observe('a', agents.a.snapshot.messages);
-    const bInterrupted = interruptions.current.observe('b', agents.b.snapshot.messages);
-    const interrupted = aInterrupted.interrupted || bInterrupted.interrupted;
+    for (const agent of agentIds) {
+      if (runId && agents[agent].snapshot.runId !== runId) continue;
+      if (!playbackRun.current.initialized.has(agent)) {
+        tracker.current.baseline(agent, agents[agent].snapshot.messages, 'completed');
+        playbackRun.current.initialized.add(agent);
+      }
+    }
     if (testingRef.current) {
       baseline();
       if (preview) stop();
       return;
     }
     if (!enabled) return;
-    if (preview || !connectionsReady) {
+    if (preview) {
       disable();
       return;
     }
+    if (!connectionsReady) {
+      cancelPlayback();
+      setStatus('Speech on · waiting for connection');
+      return;
+    }
+    const aInterrupted = interruptions.current.observe('a', agents.a.snapshot.messages);
+    const bInterrupted = interruptions.current.observe('b', agents.b.snapshot.messages);
+    const interrupted = aInterrupted.interrupted || bInterrupted.interrupted;
     if (interrupted) {
       queue.current?.stop();
       setBusy(false);
@@ -136,7 +157,7 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
         disable();
       }
     }
-  }, [agents, enabled, preview, connectionsReady, disable, stop, baseline, runId]);
+  }, [agents, enabled, preview, connectionsReady, disable, stop, baseline, cancelPlayback, runId]);
   /* oxlint-enable react/set-state-in-effect */
   async function prepare() {
     const operation = {};
@@ -166,7 +187,6 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
         );
       await queue.current.resume();
       if (operation !== lifecycle.current) return false;
-      baseline();
       return true;
     } catch {
       setError('Audio playback could not start. Try enabling speech again.');
@@ -179,6 +199,8 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
   }
   async function enable() {
     if (!ready || preview || !connectionsReady || starting || testingRef.current) return;
+    tracker.current = new SpeechTracker();
+    baseline('completed');
     if (await prepare()) {
       setEnabled(true);
       setFeedback(false);

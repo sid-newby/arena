@@ -322,6 +322,45 @@ describe('Reviewed debate lifecycle', () => {
     await chat.stopConversation(runId);
     expect(debate.snapshot(runId).phase).toBe('stopped');
   });
+  it('lets both analysis seats publish text outputs through their advertised runtime tools', async () => {
+    execute = async (_seat, context) => {
+      await new Promise<void>((resolve) =>
+        context.controller.signal.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    };
+    const value = await ready();
+    await debate.start(runId, {
+      expectedRevision: value.revision,
+      requestId: 'text-artifact-start',
+    });
+    await settle();
+    expect(observed).toHaveLength(2);
+    const published: string[] = [];
+    for (const { seat, context } of observed) {
+      expect(context.tools?.map((tool) => tool.name)).toContain('publish_text_artifact');
+      expect(context.tools?.map((tool) => tool.name)).not.toContain('write_file');
+      expect(context.text).toContain('Publish completed text directly with publish_text_artifact');
+      const result = JSON.parse(
+        await context.tool('publish_text_artifact', {
+          path: 'recommendation.md',
+          text: `${seat} independent recommendation`,
+        }),
+      );
+      published.push(result.id);
+      expect(debate.artifactView(runId, result.id).text).toBe(`${seat} independent recommendation`);
+      expect(debate.artifactView(runId, result.id).artifact.seat).toBe(seat);
+    }
+    expect(debate.snapshot(runId).artifacts).toHaveLength(2);
+    const other = observed.find((item) => item.seat === 'b');
+    expect(other).toBeDefined();
+    await expect(
+      other!.context.tool('read_artifact', { artifactId: published[0] }),
+    ).rejects.toThrow('independent');
+    expect(
+      store.runs.correspondence(runId).filter((event) => event.kind === 'artifact.published'),
+    ).toHaveLength(2);
+    await chat.stopConversation(runId);
+  });
   it('opens comparison only after both outputs and makes attributed peer snapshots readable', async () => {
     let value = await ready();
     await debate.start(runId, {

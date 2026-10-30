@@ -229,7 +229,7 @@ export class DebateService implements OnModuleDestroy {
           signal,
           profile: binding.toolProfile,
         });
-        if (name === 'publish_artifact')
+        if (name === 'publish_artifact' || name === 'publish_text_artifact')
           this.chat.publishEvent(binding.runId, 'artifact.published', {
             role: binding.role,
             turnId,
@@ -621,7 +621,7 @@ export class DebateService implements OnModuleDestroy {
   private prompt(runId: string, seat: SeatId, stage: WorkflowStage) {
     const task = this.workflows.read(runId).task;
     if (!task) throw new Error('Task is missing.');
-    const brief = `Sid started a reviewed ${task.mode} task. You occupy seat ${seat.toUpperCase()}.\nQuestion: ${task.question}\nExpected artifact: ${task.expectedArtifact}\nSuccess criteria: ${JSON.stringify(task.criteria)}\nShared grounding: ${JSON.stringify(task.grounding)}\nTool profile: ${task.profile}. Use web search and Context7 for research when useful. Use only your own workspace and provided tools. Publish completed files with publish_artifact.\n`;
+    const brief = `Sid started a reviewed ${task.mode} task. You occupy seat ${seat.toUpperCase()}.\nQuestion: ${task.question}\nExpected artifact: ${task.expectedArtifact}\nSuccess criteria: ${JSON.stringify(task.criteria)}\nShared grounding: ${JSON.stringify(task.grounding)}\nTool profile: ${task.profile}. Use web search and Context7 for research when useful. Use only your own workspace and provided tools. Publish completed text directly with publish_text_artifact, supplying its relative filename and text. This works in analysis mode without writing a workspace file. Publish existing workspace files with publish_artifact.\n`;
     if (stage === 'independent')
       return (
         brief +

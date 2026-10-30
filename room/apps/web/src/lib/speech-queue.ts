@@ -56,9 +56,11 @@ export class SpeechTracker {
     this.notice = undefined;
     return notice;
   }
-  baseline(agent: Speaker, replies: SpeechReply[]) {
-    for (const reply of replies)
+  baseline(agent: Speaker, replies: SpeechReply[], mode: 'all' | 'completed' = 'all') {
+    for (const reply of replies) {
+      if (mode === 'completed' && reply.status === 'streaming') continue;
       this.seen.set(`${agent}:${reply.id}`, { text: reply.text, blocked: true });
+    }
   }
   collect(agent: Speaker, replies: SpeechReply[]): SpeechSegment[] {
     const segments: SpeechSegment[] = [];

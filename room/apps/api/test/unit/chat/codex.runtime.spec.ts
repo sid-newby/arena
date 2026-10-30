@@ -108,10 +108,10 @@ describe('Codex room tool sessions', () => {
       },
     });
     expect(calls.some((call) => call.method === 'thread/inject_items')).toBe(false);
-    expect(turn.saveSession).toHaveBeenCalledWith('new-session', 5);
+    expect(turn.saveSession).toHaveBeenCalledWith('new-session', 6);
   });
 
-  it.each([0, 2, 3, 4])(
+  it.each([0, 2, 3, 4, 5])(
     'migrates a version %i session and injects retained messages and room tool records before saving',
     async (toolVersion) => {
       const calls = protocol();
@@ -164,13 +164,13 @@ describe('Codex room tool sessions', () => {
           ],
         },
       });
-      expect(turn.saveSession).toHaveBeenCalledWith('new-session', 5);
+      expect(turn.saveSession).toHaveBeenCalledWith('new-session', 6);
     },
   );
 
-  it('resumes current expression-aware sessions without replaying room history', async () => {
+  it('resumes current tool sessions without replaying room history', async () => {
     const calls = protocol();
-    await runCodex(context({ session: 'old-session', toolVersion: 5 }), workspace);
+    await runCodex(context({ session: 'old-session', toolVersion: 6 }), workspace);
     expect(calls.find((call) => call.method === 'thread/resume')).toMatchObject({
       params: { threadId: 'old-session' },
     });

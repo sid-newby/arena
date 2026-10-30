@@ -5,12 +5,33 @@ contexts. A room playback queue schedules incoming 44.1kHz float32 PCM chunks
 through Web Audio. It plays one speaker at a time; synthesis contexts can be
 independent. No microphone or STT path is installed.
 
-Speech starts off. Enable speech explicitly to send narration for new completed
-replies to Cartesia. Enabling baselines existing and active replies; reconnect, preview,
-stop, or turn failure clears playback and prevents old/late content being read.
+Speech starts off when the page loads. Enable speech explicitly to send narration
+for completed replies to Cartesia. The choice stays on across run changes and
+temporary reconnects. These transitions cancel old audio; the first snapshots
+of another run skip completed history and allow active replies to finish speaking.
+Enabling speech also skips completed history and includes replies still in progress.
+Preview switches speech off. Stop audio, voice tests, and turn failure suppress
+the affected active replies so their late completions are not spoken.
 The fixed voice sample buttons are separate from automatic reply speech. Stop
 audio cancels the request and all scheduled sources. End-to-end timeout is45s;
 AudioContext unlock timeout is5s. No automatic synthesis retry is performed.
+
+## Browser lifecycle regression
+
+With `task dev` running, open a separate browser tab at the room URL. In that
+tab's developer console, run:
+
+```javascript
+const { mountSpeechChecks } = await import('/test/speech-lifecycle.browser.mjs');
+mountSpeechChecks();
+```
+
+Click **Run speech checks**. This replaces that tab with a test view and runs the
+production speech hook and Web Audio queue against synthetic snapshots and silent
+PCM audio. It sends no model or Cartesia requests and changes no saved runs.
+`window.speechCheckResult` contains nine passing checks or the failure details.
+The checks cover run changes, staggered snapshots, reconnects, enabling during a
+reply, explicit Stop, voice tests, and preview. Reload the tab to return to the room.
 
 ## Saved narration
 
