@@ -90,7 +90,9 @@ export class DebateService implements OnModuleDestroy {
   private readonly sandbox = new CommandSandbox();
   private readonly chat: ChatService;
   private readonly root: string;
-  private readonly timer: ReturnType<typeof setInterval>;
+  private unsubscribeCommits?: () => void;
+  private readonly deadlines = new Map<string, ReturnType<typeof setTimeout>>();
+  private feedbackRetry?: ReturnType<typeof setTimeout>;
   private closed = false;
   private feedbackSender?: (
     runId: string,
@@ -170,10 +172,6 @@ export class DebateService implements OnModuleDestroy {
       }
     };
     this.attach();
-    this.timer = setInterval(() => {
-      if (!this.closed) this.poll();
-    }, 200);
-    this.timer.unref();
   }
   static forTest(
     chat: ChatService,
@@ -189,6 +187,7 @@ export class DebateService implements OnModuleDestroy {
       verify,
       closed: false,
       feedbackInFlight: new Set<string>(),
+      deadlines: new Map(),
     }) as DebateService;
     service.attach();
     return service;
@@ -246,12 +245,39 @@ export class DebateService implements OnModuleDestroy {
               : 'Use the task controls while this structured step is active. Maestro chat remains available.',
           );
       },
-      started: (runId, seat, turnId) => {
+      intervention: (runId, _seat, _intent) => {
         const record = this.workflows.read(runId);
-        if (record.phase === 'discussion')
+        if (
+          record.task &&
+          ['completed', 'stopped', 'preparing', 'draft', 'ready', 'failed', 'interrupted'].includes(
+            record.phase,
+          )
+        )
+          throw new ConflictException(
+            'This task is not open for main-seat interventions. Use a side conversation or start/resume the task.',
+          );
+      },
+      messageDrain: (runId) => {
+        const record = this.workflows.read(runId);
+        return (
+          !record.task ||
+          (!record.pauseRequested &&
+            ['independent', 'comparison', 'discussion', 'awaiting-comparison'].includes(
+              record.phase,
+            ))
+        );
+      },
+      started: (runId, seat, turnId, intervention) => {
+        const record = this.workflows.read(runId);
+        if (record.phase === 'discussion' || (intervention && record.task))
           this.workflows.update(
             runId,
-            { turns: { ...record.turns, [seat]: turnId } },
+            {
+              turns: { ...record.turns, [seat]: turnId },
+              ...(intervention && record.phase === 'awaiting-comparison'
+                ? { phase: 'independent' as const }
+                : {}),
+            },
             'workflow.dispatched',
           );
       },
@@ -279,6 +305,29 @@ export class DebateService implements OnModuleDestroy {
       },
     };
     this.chat.setExecutionPolicy(policy);
+    this.unsubscribeCommits = this.chat.committed((runId) => {
+      if (this.closed) return;
+      this.reconcile(runId);
+      this.armDeadline(runId);
+      this.deliverFeedback();
+    });
+    for (const run of this.chat.listRuns().runs) this.armDeadline(run.id);
+  }
+  private armDeadline(runId: string) {
+    const record = this.workflows.read(runId);
+    const current = this.deadlines.get(runId);
+    if (current) clearTimeout(current);
+    this.deadlines.delete(runId);
+    if (!record.deadline || ['completed', 'stopped'].includes(record.phase)) return;
+    const timer = setTimeout(
+      () => {
+        this.deadlines.delete(runId);
+        if (!this.closed) this.reconcile(runId);
+      },
+      Math.max(0, record.deadline - Date.now()),
+    );
+    timer.unref();
+    this.deadlines.set(runId, timer);
   }
   private unfinishedSeats(runId: string, record: WorkflowRecord): SeatId[] {
     if (!record.stage) return [];
@@ -319,10 +368,12 @@ export class DebateService implements OnModuleDestroy {
         : null,
       artifacts: this.artifacts(runId),
       retrySeats:
-        ['paused', 'interrupted'].includes(record.phase) && !this.chat.busy(runId)
+        ['paused', 'interrupted'].includes(record.phase) && !this.chat.executing(runId)
           ? this.unfinishedSeats(runId, record)
           : [],
-      busy: this.chat.busy(runId),
+      busy: ['paused', 'interrupted'].includes(record.phase)
+        ? this.chat.executing(runId)
+        : this.chat.busy(runId),
       ...(workspaceError ? { workspaceError } : {}),
       ...(record.proposedSeats ? { proposedSeats: record.proposedSeats } : {}),
       ...(record.error ? { error: record.error } : {}),
@@ -710,7 +761,7 @@ export class DebateService implements OnModuleDestroy {
       !['paused', 'interrupted'].includes(record.phase) ||
       !record.task ||
       !record.stage ||
-      this.chat.busy(runId)
+      this.chat.executing(runId)
     )
       throw new ConflictException('Review an idle paused or interrupted step before resuming.');
     if (record.deadline && Date.now() >= record.deadline)
@@ -739,6 +790,7 @@ export class DebateService implements OnModuleDestroy {
         'workflow.resumed',
       );
     });
+    this.chat.reapproveQueued(runId);
     if (retrySeats.length) await this.dispatch(runId, record.stage, command.requestId, retrySeats);
     this.reconcile(runId);
     return this.snapshot(runId);
@@ -775,7 +827,7 @@ export class DebateService implements OnModuleDestroy {
       return;
     }
     if (!['independent', 'comparison', 'discussion'].includes(record.phase)) return;
-    if (this.chat.busy(runId)) return;
+    if (record.pauseRequested ? this.chat.executing(runId) : this.chat.busy(runId)) return;
     if (record.pauseRequested) {
       this.workflows.update(runId, { phase: 'paused', pauseRequested: false }, 'workflow.paused');
       return;
@@ -856,7 +908,19 @@ export class DebateService implements OnModuleDestroy {
               this.workflows.finishFeedback(event.id, false, event.attempts, Date.now());
           },
         )
-        .finally(() => this.feedbackInFlight.delete(event.id));
+        .finally(() => {
+          this.feedbackInFlight.delete(event.id);
+          if (!this.closed && !this.feedbackRetry) {
+            this.feedbackRetry = setTimeout(
+              () => {
+                this.feedbackRetry = undefined;
+                this.deliverFeedback();
+              },
+              Math.min(300000, 5000 * 2 ** event.attempts),
+            );
+            this.feedbackRetry.unref();
+          }
+        });
     }
   }
   artifacts(runId: string): ArtifactMetadata[] {
@@ -1205,6 +1269,9 @@ export class DebateService implements OnModuleDestroy {
   }
   onModuleDestroy() {
     this.closed = true;
-    if (this.timer) clearInterval(this.timer);
+    this.unsubscribeCommits?.();
+    this.deadlines.forEach(clearTimeout);
+    this.deadlines.clear();
+    if (this.feedbackRetry) clearTimeout(this.feedbackRetry);
   }
 }

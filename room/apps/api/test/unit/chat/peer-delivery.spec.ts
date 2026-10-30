@@ -285,9 +285,19 @@ describe('Panelist scheduling', () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(service.snapshot('b').pendingPanelistMessages).toBe(1);
     expect(seen).toEqual(['Busy human']);
+    const run = service.currentRun();
+    service.submitMessage(
+      'b',
+      {
+        requestId: 'next-human-request',
+        text: 'Human next',
+        intent: 'queue',
+        expectedRevision: run.revision,
+      },
+      run.id,
+    );
     gate.resolve();
     await vi.advanceTimersByTimeAsync(0);
-    await service.submit('b', { requestId: 'next-human-request', text: 'Human next' });
     await vi.advanceTimersByTimeAsync(500);
     expect(seen.slice(0, 2)).toEqual(['Busy human', 'Human next']);
     expect(JSON.parse(seen[2].slice(seen[2].indexOf('\n') + 1)).text).toBe('Hello from Luna');

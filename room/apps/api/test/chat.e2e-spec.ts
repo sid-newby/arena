@@ -32,6 +32,10 @@ describe('Local room API boundaries', () => {
       },
       run: async (context) => {
         context.append('Hello Sid.');
+        if (context.text === 'Hold this reply.')
+          await new Promise<void>((resolve) =>
+            context.controller.signal.addEventListener('abort', () => resolve(), { once: true }),
+          );
       },
     };
     const unavailable: AgentRuntime = {
@@ -89,6 +93,87 @@ describe('Local room API boundaries', () => {
     await app.close();
     vi.unstubAllEnvs();
     rmSync(controlRoot, { recursive: true, force: true });
+  });
+  it('returns durable message receipts and supports cancelling a queued follow-up over HTTP', async () => {
+    const run = (
+      await request(app.getHttpServer()).get('/api/runs/current').set('Host', host).expect(200)
+    ).body;
+    const base = `/api/runs/${run.id}/agents/b`;
+    const first = await request(app.getHttpServer())
+      .post(`${base}/messages`)
+      .set('Host', host)
+      .send({
+        requestId: 'http-message-first',
+        text: 'Hold this reply.',
+        expectedRevision: run.revision,
+        intent: 'queue',
+      })
+      .expect(202);
+    const second = await request(app.getHttpServer())
+      .post(`${base}/messages`)
+      .set('Host', host)
+      .send({
+        requestId: 'http-message-next',
+        text: 'Follow up.',
+        expectedRevision: run.revision,
+        intent: 'queue',
+      })
+      .expect(202);
+    expect(first.body.id).toBeTruthy();
+    expect(second.body.status).toBe('queued');
+    const retry = await request(app.getHttpServer())
+      .post(`${base}/messages`)
+      .set('Host', host)
+      .send({
+        requestId: 'http-message-next',
+        text: 'Follow up.',
+        expectedRevision: run.revision,
+        intent: 'queue',
+      })
+      .expect(202);
+    expect(retry.body.id).toBe(second.body.id);
+    await request(app.getHttpServer())
+      .delete(`${base}/messages/${second.body.id}`)
+      .set('Host', host)
+      .expect(200);
+    const snapshot = await request(app.getHttpServer()).get(base).set('Host', host).expect(200);
+    expect(
+      snapshot.body.humanMessages.find((value: { id: string }) => value.id === second.body.id)
+        .status,
+    ).toBe('cancelled');
+    await request(app.getHttpServer())
+      .post(`${base}/messages`)
+      .set('Host', host)
+      .send({
+        requestId: 'http-message-next',
+        text: 'Follow up.',
+        expectedRevision: run.revision,
+        intent: 'interrupt',
+      })
+      .expect(409);
+  });
+  it('routes side conversation independently with no main reply or session mutation', async () => {
+    const run = (
+      await request(app.getHttpServer()).get('/api/runs/current').set('Host', host).expect(200)
+    ).body;
+    const base = `/api/runs/${run.id}/agents/b`;
+    await request(app.getHttpServer())
+      .post(`${base}/side-conversation`)
+      .set('Host', host)
+      .send({
+        requestId: 'http-side-request',
+        text: 'Separate question.',
+        expectedRevision: run.revision,
+      })
+      .expect(202);
+    const side = await request(app.getHttpServer())
+      .get(`${base}/side-conversation`)
+      .set('Host', host)
+      .expect(200);
+    expect(side.body.messages).toHaveLength(1);
+    expect(side.body.messages[0].text).toBe('Hello Sid.');
+    const main = await request(app.getHttpServer()).get(base).set('Host', host).expect(200);
+    expect(main.body.messages).toHaveLength(0);
   });
   it('routes private Maestro chat without publishing into debate correspondence', async () => {
     const run = await request(app.getHttpServer())
