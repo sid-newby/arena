@@ -178,6 +178,11 @@ hash. HTML previews run in an opaque sandbox. Maestro can propose moderation
 actions for explicit user application and retain an attributed prose synthesis.
 Synthesis does not automatically merge code. Workspaces remain retained.
 
+The main composer supports queued follow-ups and interrupt-and-send while a seat
+works. Each seat also has a separate read-only side conversation. See
+[seat messaging](room/docs/seat-messaging.md) for delivery, cancellation, recovery,
+and side-conversation behavior.
+
 A/B voices follow the seats through `MODEL_A_VOICE_ID` and `MODEL_B_VOICE_ID`.
 Either seat can use an available subscribed Codex or Anthropic model. The staged
 design and verification plan is in

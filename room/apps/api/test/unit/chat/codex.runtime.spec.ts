@@ -252,7 +252,7 @@ describe('Configured Codex role sessions', () => {
       stdin: new PassThrough(),
       stdout: new PassThrough(),
       stderr: new PassThrough(),
-      kill: vi.fn(),
+      kill: vi.fn<() => void>(),
     });
     const turn = context();
     server.stdin.on('data', (data) => {
