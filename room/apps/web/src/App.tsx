@@ -14,6 +14,7 @@ import { assertSendScope, type SendScope } from '@/lib/run-scope';
 import { ExpressionLab } from '@/components/expression-lab';
 import type { ExpressionSnapshot } from '@/lib/panel-expression';
 import type { ActivityFrame } from '@/lib/panel-motion';
+import { messagePending, type MessageIntent } from '@/lib/messaging';
 
 function readEffectsEnabled() {
   try {
@@ -51,18 +52,24 @@ export default function App() {
     agentIds.some(
       (id) =>
         room.agents[id].snapshot.status === 'working' ||
+        room.agents[id].snapshot.humanMessages.some(messagePending) ||
+        room.agents[id].side?.status === 'working' ||
+        room.agents[id].side?.messages.some((message) => message.status === 'queued') ||
         room.agents[id].pending ||
         room.agents[id].snapshot.pendingPanelistMessages > 0,
     );
-  async function send(id: AgentId, text: string, requestId: string, scope: SendScope) {
+  async function send(
+    id: AgentId,
+    text: string,
+    requestId: string,
+    scope: SendScope,
+    intent: MessageIntent,
+  ) {
     assertSendScope(room.runId ?? '', scope);
     setConversationAction({ status: 'idle' });
-    if (
-      scope.revision === room.agents[id].snapshot.revision &&
-      room.agents[id].snapshot.activeSource === 'panelist'
-    )
+    if (scope.revision === room.agents[id].snapshot.revision && intent === 'interrupt')
       speech.stop();
-    await room.send(id, text, requestId, scope);
+    await room.send(id, text, requestId, scope, intent);
   }
   async function stopConversation() {
     speech.stop();

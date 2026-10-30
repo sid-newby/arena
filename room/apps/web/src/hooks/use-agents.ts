@@ -13,6 +13,12 @@ import {
 } from '@/lib/agents';
 import { assertSendScope, CatalogRefresh, type SendScope } from '@/lib/run-scope';
 import { ExpressionClock } from '@/lib/panel-expression';
+import {
+  parseMessageReceipt,
+  parseSideSnapshot,
+  type MessageIntent,
+  type SideConversationSnapshot,
+} from '@/lib/messaging';
 
 type Connection = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 export type AgentState = {
@@ -21,6 +27,8 @@ export type AgentState = {
   connection: Connection;
   error?: string;
   pending: boolean;
+  side?: SideConversationSnapshot;
+  sideError?: string;
 };
 type Room = Record<AgentId, AgentState>;
 const initialAgent: AgentState = {
@@ -161,6 +169,25 @@ export function useAgents() {
                 },
               });
               subscriptions.push(unsubscribe);
+              subscriptions.push(
+                subscribeRoomEvents(run.id, `side-${info.id}`, {
+                  message: (event) => {
+                    if (abort.signal.aborted) return;
+                    try {
+                      update(info.id, {
+                        side: parseSideSnapshot(JSON.parse(event.data), run.id, info.id),
+                        sideError: undefined,
+                      });
+                    } catch (cause) {
+                      update(info.id, {
+                        sideError:
+                          cause instanceof Error ? cause.message : 'Unreadable side conversation.',
+                      });
+                    }
+                  },
+                  error: () => {},
+                }),
+              );
             } catch (error) {
               if (!abort.signal.aborted)
                 update(info.id, {
@@ -186,7 +213,13 @@ export function useAgents() {
     };
   }, [generation, update]);
 
-  async function send(id: AgentId, text: string, requestId: string, requested: SendScope) {
+  async function send(
+    id: AgentId,
+    text: string,
+    requestId: string,
+    requested: SendScope,
+    intent: MessageIntent = 'queue',
+  ) {
     const scope = activeScope.current;
     if (!scope || scope.abort.signal.aborted) throw new Error('Wait for the run to connect.');
     assertSendScope(scope.run.id, requested);
@@ -196,19 +229,17 @@ export function useAgents() {
     update(id, { pending: true });
     try {
       await api(
-        `/api/runs/${encodeURIComponent(scope.run.id)}/agents/${id}/turns`,
+        `/api/runs/${encodeURIComponent(scope.run.id)}/agents/${id}/messages`,
         (value) => {
+          const receipt = parseMessageReceipt(value, scope.run.id, id);
           if (
-            typeof value !== 'object' ||
-            value === null ||
-            !('turnId' in value) ||
-            typeof value.turnId !== 'string'
-          ) {
-            throw new Error(
-              'The API did not confirm this message. Retry to check the same request.',
-            );
-          }
-          return value;
+            receipt.requestId !== requestId ||
+            receipt.text !== text ||
+            receipt.intent !== intent ||
+            receipt.revision !== requested.revision
+          )
+            throw new Error('The API confirmed a different message. Retry the same request.');
+          return receipt;
         },
         {
           method: 'POST',
@@ -217,6 +248,7 @@ export function useAgents() {
             requestId,
             text,
             expectedRevision: requested.revision,
+            intent,
           }),
           signal: AbortSignal.any([scope.abort.signal, AbortSignal.timeout(30000)]),
         },
@@ -225,6 +257,20 @@ export function useAgents() {
       busy.current.delete(busyKey);
       if (activeScope.current === scope) update(id, { pending: false });
     }
+  }
+
+  async function cancelMessage(id: AgentId, messageId: string) {
+    const scope = activeScope.current;
+    if (!scope || scope.abort.signal.aborted) throw new Error('Wait for the run to connect.');
+    const response = await fetch(
+      `/api/runs/${encodeURIComponent(scope.run.id)}/agents/${id}/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: 'DELETE',
+        signal: AbortSignal.any([scope.abort.signal, AbortSignal.timeout(15000)]),
+      },
+    );
+    if (!response.ok)
+      throw new Error('Could not cancel this message. Its delivery may have started.');
   }
 
   async function stop(id: AgentId) {
@@ -260,5 +306,5 @@ export function useAgents() {
     return () => window.removeEventListener('lilbits-run-changed', reconnect);
   }, [reconnect]);
 
-  return { runId, agents, apiError, send, stop, stopConversation, reconnect };
+  return { runId, agents, apiError, send, stop, cancelMessage, stopConversation, reconnect };
 }

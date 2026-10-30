@@ -1,4 +1,4 @@
-type Channel = 'a' | 'b' | 'maestro';
+export type Channel = 'a' | 'b' | 'maestro' | 'side-a' | 'side-b' | 'workflow';
 type Listener = { message: (event: { data: string }) => void; error: () => void };
 type Connection = {
   stream?: EventSource;
@@ -25,7 +25,7 @@ export function subscribeRoomEvents(runId: string, channel: Channel, listener: L
       if (entry.stream) return;
       const stream = new EventSource(`/api/runs/${encodeURIComponent(runId)}/maestro/room-events`);
       entry.stream = stream;
-      for (const name of ['a', 'b', 'maestro'] as const) {
+      for (const name of ['a', 'b', 'maestro', 'side-a', 'side-b', 'workflow'] as const) {
         stream.addEventListener(name, (event) => {
           if (!(event instanceof MessageEvent) || typeof event.data !== 'string') return;
           entry.latest.set(name, event.data);

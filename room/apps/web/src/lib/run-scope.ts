@@ -1,4 +1,5 @@
 import type { AgentId, AgentInfo } from './agents.ts';
+import type { MessageIntent } from './messaging.ts';
 
 export type SendScope = { runId: string; revision: number };
 export type DeliveryBatch = SendScope & {
@@ -6,6 +7,7 @@ export type DeliveryBatch = SendScope & {
   targets: AgentId[];
   requestId: string;
   delivered: Set<AgentId>;
+  intent: MessageIntent;
 };
 export type ScopedCatalog = { runId: string; revision: number; agents: AgentInfo[] };
 
@@ -14,11 +16,13 @@ export function deliveryMatches(
   scope: SendScope,
   text: string,
   targets: AgentId[],
+  intent: MessageIntent = 'queue',
 ): batch is DeliveryBatch {
   return Boolean(
     batch &&
     batch.runId === scope.runId &&
     batch.text === text &&
+    batch.intent === intent &&
     batch.targets.length === targets.length &&
     batch.targets.every((target, index) => target === targets[index]),
   );
@@ -30,10 +34,11 @@ export function prepareDelivery(
   text: string,
   targets: AgentId[],
   requestId: string,
+  intent: MessageIntent = 'queue',
 ): DeliveryBatch {
-  return deliveryMatches(batch, scope, text, targets)
+  return deliveryMatches(batch, scope, text, targets, intent)
     ? { ...batch, delivered: new Set(batch.delivered) }
-    : { ...scope, text, targets, requestId, delivered: new Set() };
+    : { ...scope, text, targets, requestId, intent, delivered: new Set() };
 }
 
 export function assertSendScope(activeRunId: string, requested: SendScope) {

@@ -15,6 +15,8 @@ import {
 import { useMaestro } from '@/hooks/use-maestro';
 import { useRunSetup } from '@/hooks/use-run-setup';
 import type { MaestroMessage } from '@/lib/maestro';
+import { subscribeRoomEvents } from '@/lib/room-events';
+import { parseWorkflowInvalidation } from '@/lib/messaging';
 import './maestro-dialog.css';
 
 function FeedbackMessage({
@@ -154,6 +156,9 @@ export function MaestroDialog({ runId, disabled = false }: { runId?: string; dis
     if (!maestro.runId) return;
     const id = maestro.runId;
     const controller = new AbortController();
+    let running = false;
+    let requested = false;
+    let cursor = -1;
     async function check() {
       try {
         const response = await fetch(`/api/runs/${encodeURIComponent(id)}/feedback-delivery`, {
@@ -175,11 +180,42 @@ export function MaestroDialog({ runId, disabled = false }: { runId?: string; dis
         // The normal connection indicator reports connection failures.
       }
     }
-    void check();
-    const timer = window.setInterval(() => void check(), 15000);
+    const drain = async () => {
+      if (running) return;
+      running = true;
+      try {
+        while (requested) {
+          if (controller.signal.aborted) break;
+          requested = false;
+          await check();
+        }
+      } finally {
+        running = false;
+      }
+    };
+    const request = () => {
+      requested = true;
+      void drain();
+    };
+    const unsubscribe = subscribeRoomEvents(id, 'workflow', {
+      message: ({ data }) => {
+        try {
+          const incoming = parseWorkflowInvalidation(JSON.parse(data), id);
+          if (incoming.cursor <= cursor) return;
+          cursor = incoming.cursor;
+          request();
+        } catch {
+          setDeliveryError('Could not read the feedback delivery update. Reconnect to retry.');
+        }
+      },
+      error: () => {
+        cursor = -1;
+      },
+    });
+    request();
     return () => {
       controller.abort();
-      window.clearInterval(timer);
+      unsubscribe();
     };
   }, [maestro.runId]);
   async function retryDelivery() {

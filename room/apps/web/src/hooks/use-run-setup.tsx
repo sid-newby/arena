@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { api, parseRunReference } from '@/lib/agents';
+import { subscribeRoomEvents } from '@/lib/room-events';
+import { parseWorkflowInvalidation } from '@/lib/messaging';
 import {
   defaultTask,
   cleanTask,
@@ -431,18 +433,51 @@ export function useRunSetup({
     const scope = lease.current;
     if (!scope || !active) return;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      await refresh(scope);
-      if (!cancelled && !scope.controller.signal.aborted)
-        timer = setTimeout(() => void poll(), 2000);
+    let running = false;
+    let requested = false;
+    let cursor = -1;
+    let revision = -1;
+    const drain = async () => {
+      if (running) return;
+      running = true;
+      try {
+        while (requested) {
+          if (cancelled || scope.controller.signal.aborted) break;
+          requested = false;
+          await refresh(scope);
+        }
+      } finally {
+        running = false;
+      }
     };
-    void poll();
+    const request = () => {
+      requested = true;
+      void drain();
+    };
+    const unsubscribe = subscribeRoomEvents(scope.runId, 'workflow', {
+      message: ({ data }) => {
+        if (cancelled || scope.controller.signal.aborted) return;
+        try {
+          const incoming = parseWorkflowInvalidation(JSON.parse(data), scope.runId);
+          if (incoming.cursor <= cursor && incoming.revision <= revision) return;
+          cursor = Math.max(cursor, incoming.cursor);
+          revision = Math.max(revision, incoming.revision);
+          request();
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : 'Unreadable run update.');
+        }
+      },
+      error: () => {
+        cursor = -1;
+        revision = -1;
+      },
+    });
+    request();
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      unsubscribe();
     };
-  }, [runId, active, refresh]);
+  }, [runId, active, refresh, setError]);
 
   useEffect(() => {
     if (!active) return;
