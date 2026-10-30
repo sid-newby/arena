@@ -1,4 +1,12 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -50,6 +58,53 @@ it('enforces the analysis profile at dispatch even when a caller requests a hidd
       input: { path: 'file', text: 'denied' },
     }),
   ).rejects.toThrow('capability profile');
+});
+
+it('publishes analysis text without editing its workspace or exposing it to the other seat', async () => {
+  const { broker, manager, run } = await fixture();
+  const before = readdirSync(run.seats.a.root);
+  const call = (input: Record<string, unknown>) =>
+    broker.call({
+      runId: run.runId,
+      seat: 'a',
+      turnId: 'analysis-turn',
+      name: 'publish_text_artifact',
+      input,
+    });
+  expect(broker.definitions().map((tool) => tool.name)).toContain('publish_text_artifact');
+  const content = '# Recommendation\nUse the smaller design.';
+  const artifact = JSON.parse(
+    await call({ path: 'analysis/result.md', text: content, title: 'Recommendation' }),
+  );
+  expect(artifact).toMatchObject({
+    seat: 'a',
+    turnId: 'analysis-turn',
+    path: 'analysis/result.md',
+    title: 'Recommendation',
+  });
+  expect(
+    manager
+      .artifact({
+        runId: run.runId,
+        artifactId: artifact.id,
+        viewer: 'a',
+        allowPeerArtifacts: false,
+      })
+      .content.toString(),
+  ).toBe(content);
+  expect(() =>
+    manager.artifact({
+      runId: run.runId,
+      artifactId: artifact.id,
+      viewer: 'b',
+      allowPeerArtifacts: false,
+    }),
+  ).toThrow('Peer artifacts');
+  expect(readdirSync(run.seats.a.root)).toEqual(before);
+  for (const path of ['../b/result.md', '/tmp/result.md', '.git/config'])
+    await expect(call({ path, text: content })).rejects.toThrow('permitted workspace');
+  await expect(call({ path: 'large.md', text: 'é'.repeat(131073) })).rejects.toThrow('256 KiB');
+  await expect(call({ path: 'empty.md', text: '  ' })).rejects.toThrow('non-empty');
 });
 
 describe.skipIf(process.platform !== 'darwin' || process.env.ROOM_SANDBOX_TESTS !== '1')(
