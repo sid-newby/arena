@@ -33,6 +33,9 @@ export class SideConversationStore {
     db.exec(`CREATE TABLE IF NOT EXISTS side_sessions(binding_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,seat TEXT NOT NULL,checkpoint TEXT NOT NULL,continuation TEXT,tool_version INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS side_messages(id TEXT PRIMARY KEY,binding_id TEXT NOT NULL,request_id TEXT NOT NULL,revision INTEGER NOT NULL,prompt TEXT NOT NULL,text TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,error TEXT,created_at INTEGER NOT NULL,UNIQUE(binding_id,request_id));`);
     db.prepare(
+      "UPDATE side_sessions SET continuation=NULL,tool_version=0 WHERE binding_id IN (SELECT binding_id FROM side_messages WHERE status='streaming')",
+    ).run();
+    db.prepare(
       "UPDATE side_messages SET status='failed',error='The server restarted with a side reply in flight. Review the conversation and resend explicitly.' WHERE status='queued' AND binding_id IN (SELECT binding_id FROM side_messages WHERE status='streaming')",
     ).run();
     db.prepare(
@@ -81,6 +84,11 @@ export class SideConversationStore {
     this.db
       .prepare('UPDATE side_sessions SET continuation=?,tool_version=? WHERE binding_id=?')
       .run(continuation, toolVersion, bindingId);
+  }
+  resetSession(bindingId: string) {
+    this.db
+      .prepare('UPDATE side_sessions SET continuation=NULL,tool_version=0 WHERE binding_id=?')
+      .run(bindingId);
   }
   update(binding: ParticipantBinding, id: string, status: SideMessage['status'], error?: string) {
     this.transaction(() => {
