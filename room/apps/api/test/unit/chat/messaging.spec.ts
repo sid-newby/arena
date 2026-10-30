@@ -290,6 +290,37 @@ describe('Durable seat messages', () => {
     expect(reopened.messaging.list(runId, 'a').map((v) => v.status)).toEqual(['stopped', 'queued']);
     reopened.close();
   });
+  it('does not reuse an unconfirmed side continuation and retains completed private context', async () => {
+    chat.submitSide(runId, 'a', {
+      requestId: 'side-known-complete',
+      text: 'Earlier side question',
+      expectedRevision: chat.run(runId).revision,
+    });
+    await settle();
+    runs[0].release();
+    await settle();
+    chat.submitSide(runId, 'a', {
+      requestId: 'side-unknown-cancel',
+      text: 'Unconfirmed side work',
+      expectedRevision: chat.run(runId).revision,
+    });
+    await settle();
+    runs[1].context.saveSession('uncertain-side-session', 6);
+    uncertain = true;
+    await chat.stopSide(runId, 'a');
+    expect(chat.sideSnapshot(runId, 'a').messages.at(-1)?.status).toBe('failed');
+    expect(chat.sideSnapshot(runId, 'a').error).toContain('did not acknowledge');
+    uncertain = false;
+    chat.submitSide(runId, 'a', {
+      requestId: 'side-fresh-resend',
+      text: 'Continue safely',
+      expectedRevision: chat.run(runId).revision,
+    });
+    await settle();
+    expect(runs[2].context.session).toBeUndefined();
+    expect(runs[2].context.instructions).toContain('Earlier side question');
+    expect(runs[2].context.instructions).not.toContain('Unconfirmed side work');
+  });
   it('isolates side sessions, text and tools while main work continues', async () => {
     send('main');
     await settle();
@@ -389,9 +420,11 @@ describe('Committed event delivery and restart', () => {
     const first = store.side.enqueue(binding, 1, 'side-recovery-first', 'first');
     store.side.enqueue(binding, 1, 'side-recovery-next', 'next');
     store.side.update(binding, first, 'streaming');
+    store.side.saveSession(binding.id, 'old-unconfirmed-session', 6);
     store.close();
     store = new ChatStore(path, root);
     expect(store.side.list(binding.id).map((v) => v.status)).toEqual(['failed', 'failed']);
+    expect(store.side.session(binding, '').continuation).toBeNull();
     store.close();
     rmSync(root, { recursive: true, force: true });
   });
