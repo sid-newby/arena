@@ -294,10 +294,17 @@ export class ChatService implements OnModuleDestroy {
     return new Observable<{ id: string; data: unknown }>((subscriber) => {
       let cursor = after;
       const send = () => {
-        const rows = this.store.runs.correspondence(id, cursor, 500);
-        for (const row of rows) {
-          subscriber.next({ id: String(row.seq), data: row });
-          cursor = row.seq;
+        const through = this.store.runs.cursor(id);
+        while (cursor < through && !subscriber.closed) {
+          const rows = this.store.runs
+            .correspondence(id, cursor, 500)
+            .filter((row) => row.seq <= through);
+          if (!rows.length) break;
+          for (const row of rows) {
+            if (subscriber.closed) break;
+            cursor = row.seq;
+            subscriber.next({ id: String(row.seq), data: row });
+          }
         }
       };
       const unsubscribe = this.committed((runId) => {

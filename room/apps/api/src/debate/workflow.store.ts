@@ -269,18 +269,35 @@ export class WorkflowStore {
       return record;
     });
   }
-  pendingFeedback(now: number) {
+  pendingFeedback(now: number, excluded: readonly string[] = []) {
+    const exclude = excluded.length
+      ? ' AND id NOT IN (' + excluded.map(() => '?').join(',') + ')'
+      : '';
     return this.db
       .prepare(
-        'SELECT id,run_id,kind,attempts FROM workflow_feedback_queue WHERE delivered=0 AND attempts<8 AND next_at<=? ORDER BY rowid LIMIT 10',
+        'SELECT id,run_id,kind,attempts FROM workflow_feedback_queue WHERE delivered=0 AND attempts<8 AND next_at<=?' +
+          exclude +
+          ' ORDER BY rowid LIMIT 10',
       )
-      .all(now)
+      .all(now, ...excluded)
       .map((row) => ({
         id: String(row.id),
         runId: String(row.run_id),
         kind: String(row.kind) === 'blocked' ? ('blocked' as const) : ('results-ready' as const),
         attempts: Number(row.attempts),
       }));
+  }
+  nextFeedbackAt(excluded: readonly string[] = []): number | undefined {
+    const exclude = excluded.length
+      ? ' AND id NOT IN (' + excluded.map(() => '?').join(',') + ')'
+      : '';
+    const row = this.db
+      .prepare(
+        'SELECT MIN(next_at) AS next_at FROM workflow_feedback_queue WHERE delivered=0 AND attempts<8' +
+          exclude,
+      )
+      .get(...excluded);
+    return row?.next_at === null || row?.next_at === undefined ? undefined : Number(row.next_at);
   }
   finishFeedback(id: string, success: boolean, attempts: number, now: number) {
     this.transaction(() => {
