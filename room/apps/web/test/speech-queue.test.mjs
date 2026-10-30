@@ -39,6 +39,32 @@ test('history and active replies are baselined; completed replies are emitted on
   assert.deepEqual(tracker.collect('a', [reply('new', 'A fresh reply. Another', 'completed')]), []);
 });
 
+test('enabling speech skips completed history and speaks an active reply on completion', () => {
+  const tracker = new SpeechTracker();
+  tracker.baseline(
+    'a',
+    [reply('history', 'Earlier reply.', 'completed'), reply('active', 'Still working')],
+    'completed',
+  );
+  const completed = [
+    reply('history', 'Earlier reply.', 'completed'),
+    reply('active', 'Still working, now finished.', 'completed'),
+  ];
+  assert.deepEqual(
+    tracker.collect('a', completed).map((segment) => segment.replyId),
+    ['active'],
+  );
+  assert.deepEqual(tracker.collect('a', completed), []);
+});
+
+test('history baselining never re-enables an explicitly stopped active reply', () => {
+  const tracker = new SpeechTracker();
+  const active = reply('active', 'Still working');
+  tracker.baseline('b', [active]);
+  tracker.baseline('b', [active], 'completed');
+  assert.deepEqual(tracker.collect('b', [reply('active', 'Now complete.', 'completed')]), []);
+});
+
 test('uses concise speech summary instead of code displayed on the panel', () => {
   const tracker = new SpeechTracker();
   const displayed = 'Explanation.\n```typescript\nconst secret = process.env.API_KEY;\n```';
