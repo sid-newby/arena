@@ -1,3 +1,5 @@
+import { SideConversationStore } from './side-conversation.store.js';
+import { SeatMessageStore } from './message.store.js';
 import { narration } from '../speech/narration.js';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -56,6 +58,14 @@ function parseSpeechSummary(input: unknown): string | undefined {
 }
 export class ChatStore {
   private db: DatabaseSync;
+  readonly messaging: SeatMessageStore;
+  readonly side: SideConversationStore;
+  private readonly notifications = {
+    pending: new Set<string>(),
+    transaction: new Set<string>(),
+    listeners: new Set<(runId: string) => void>(),
+    scheduled: false,
+  };
   readonly runs: RunStore;
   readonly migrationBackup?: string;
   private scope?: string;
@@ -90,7 +100,22 @@ export class ChatStore {
               this.db.exec('ALTER TABLE ' + name + ' RENAME TO legacy_' + name);
           }
         });
-      this.runs = new RunStore(this.db, (action) => this.transaction(action), workspace);
+      this.runs = new RunStore(
+        this.db,
+        (action) => this.transaction(action),
+        workspace,
+        (id) => this.changed(id),
+      );
+      this.messaging = new SeatMessageStore(
+        this.db,
+        (action) => this.transaction(action),
+        (id, kind, payload) => this.runs.append(id, kind, null, null, payload),
+      );
+      this.side = new SideConversationStore(
+        this.db,
+        (action) => this.transaction(action),
+        (id, kind, payload) => this.runs.append(id, kind, null, null, payload),
+      );
       this.db.exec(`
       CREATE TABLE IF NOT EXISTS agents(run_id TEXT NOT NULL,id TEXT NOT NULL,pose TEXT NOT NULL DEFAULT 'front',pose_revision INTEGER NOT NULL DEFAULT 0,error TEXT,notice TEXT,PRIMARY KEY(run_id,id));
       CREATE TABLE IF NOT EXISTS turns(id TEXT PRIMARY KEY,agent TEXT NOT NULL,request TEXT NOT NULL,prompt TEXT NOT NULL,text TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,addressed_to TEXT,from_panelist TEXT,conversation_id TEXT NOT NULL,peer_depth INTEGER NOT NULL DEFAULT 0,run_id TEXT NOT NULL,binding_id TEXT NOT NULL,config_revision INTEGER NOT NULL,original_author TEXT,stream_revision INTEGER NOT NULL DEFAULT 0,UNIQUE(run_id,agent,request));
@@ -322,15 +347,44 @@ export class ChatStore {
       )
       .run(text, id, this.currentRunId());
   }
+  onCommit(listener: (runId: string) => void) {
+    this.notifications.listeners.add(listener);
+    return () => {
+      this.notifications.listeners.delete(listener);
+    };
+  }
+  private changed(runId: string) {
+    if (this.db.isTransaction) this.notifications.transaction.add(runId);
+    else {
+      this.notifications.pending.add(runId);
+      this.flushNotifications();
+    }
+  }
+  private flushNotifications() {
+    const state = this.notifications;
+    if (state.scheduled || !state.pending.size) return;
+    state.scheduled = true;
+    queueMicrotask(() => {
+      state.scheduled = false;
+      const runs = [...state.pending];
+      state.pending.clear();
+      for (const runId of runs) for (const listener of state.listeners) listener(runId);
+    });
+  }
   private transaction<T>(action: () => T): T {
     if (this.db.isTransaction) return action();
     this.db.exec('BEGIN IMMEDIATE');
+    this.notifications.transaction.clear();
     try {
       const result = action();
       this.db.exec('COMMIT');
+      for (const runId of this.notifications.transaction) this.notifications.pending.add(runId);
+      this.notifications.transaction.clear();
+      this.flushNotifications();
       return result;
     } catch (error) {
       this.db.exec('ROLLBACK');
+      this.notifications.transaction.clear();
       throw error;
     }
   }
@@ -361,7 +415,10 @@ export class ChatStore {
       const turn = this.turn(id);
       if (turn.status !== 'streaming') return;
       this.db.prepare('UPDATE turns SET status=? WHERE id=?').run(status, id);
-      if (status !== 'streaming') this.runs.state.finishAttempt(id, status, Date.now(), elapsedMs);
+      if (status !== 'streaming') {
+        this.runs.state.finishAttempt(id, status, Date.now(), elapsedMs);
+        this.messaging.finish(id, status);
+      }
       this.runs.append(turn.run_id, 'turn.finished', turn.agent, id, {
         text: turn.text,
         status,
@@ -717,6 +774,7 @@ export class ChatStore {
       cursor: this.runs.cursor(this.currentRunId()),
       messages,
       pendingPanelistMessages,
+      humanMessages: this.messaging.list(this.currentRunId(), agent),
       ...(working
         ? { activeSource: working.from_panelist ? ('panelist' as const) : ('human' as const) }
         : {}),

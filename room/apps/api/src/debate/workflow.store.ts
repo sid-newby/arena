@@ -283,12 +283,21 @@ export class WorkflowStore {
       }));
   }
   finishFeedback(id: string, success: boolean, attempts: number, now: number) {
-    if (success)
-      this.db.prepare('UPDATE workflow_feedback_queue SET delivered=1 WHERE id=?').run(id);
-    else
-      this.db
-        .prepare('UPDATE workflow_feedback_queue SET attempts=?,next_at=? WHERE id=?')
-        .run(attempts + 1, now + Math.min(300000, 5000 * 2 ** attempts), id);
+    this.transaction(() => {
+      const row = this.db.prepare('SELECT run_id FROM workflow_feedback_queue WHERE id=?').get(id);
+      if (!row) return;
+      if (success)
+        this.db.prepare('UPDATE workflow_feedback_queue SET delivered=1 WHERE id=?').run(id);
+      else
+        this.db
+          .prepare('UPDATE workflow_feedback_queue SET attempts=?,next_at=? WHERE id=?')
+          .run(attempts + 1, now + Math.min(300000, 5000 * 2 ** attempts), id);
+      this.append(String(row.run_id), 'workflow.feedback-delivery', {
+        eventId: id,
+        delivered: success,
+        attempts: success ? attempts : attempts + 1,
+      });
+    });
   }
   failedFeedbackCount(runId: string): number {
     const row = this.db
@@ -304,6 +313,7 @@ export class WorkflowStore {
         'UPDATE workflow_feedback_queue SET attempts=0,next_at=0 WHERE run_id=? AND delivered=0 AND attempts>=8',
       )
       .run(runId);
+    this.append(runId, 'workflow.feedback-retried', {});
   }
   check(id: string, expected: number) {
     if (this.run(id).revision !== expected)

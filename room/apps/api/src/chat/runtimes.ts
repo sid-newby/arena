@@ -1,3 +1,4 @@
+import { UnconfirmedCancellationError } from './runtime-cancellation.js';
 import { anthropicUsage } from '../state/provider-usage.js';
 import {
   createSdkMcpServer,
@@ -72,19 +73,25 @@ export async function runAnthropic(
       env: providerEnvironment(),
       systemPrompt: context.instructions ?? runtimeInstructions(role),
       resume: context.session,
-      abortController: context.controller,
+
       includePartialMessages: true,
-      tools: ['WebSearch', 'WebFetch'],
-      mcpServers: { room: server, context7: { type: 'http', url: 'https://mcp.context7.com/mcp' } },
+      tools: context.mode === 'side' ? [] : ['WebSearch', 'WebFetch'],
+      mcpServers:
+        context.mode === 'side'
+          ? {}
+          : { room: server, context7: { type: 'http', url: 'https://mcp.context7.com/mcp' } },
       strictMcpConfig: true,
       settingSources: [],
-      allowedTools: [
-        ...definitions.map((definition) => `mcp__room__${definition.name}`),
-        'WebSearch',
-        'WebFetch',
-        'mcp__context7__resolve-library-id',
-        'mcp__context7__query-docs',
-      ],
+      allowedTools:
+        context.mode === 'side'
+          ? []
+          : [
+              ...definitions.map((definition) => `mcp__room__${definition.name}`),
+              'WebSearch',
+              'WebFetch',
+              'mcp__context7__resolve-library-id',
+              'mcp__context7__query-docs',
+            ],
       permissionMode: 'dontAsk',
       canUseTool: async () => ({
         behavior: 'deny',
@@ -93,10 +100,19 @@ export async function runAnthropic(
       maxTurns: 16,
     },
   });
-  let completed = false;
+  let completed = false,
+    terminalSeen = false;
+  let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
+  const abort = () => {
+    if (!authorizedToSend) return;
+    void session.interrupt().catch(() => session.close());
+    cancellationTimer = setTimeout(() => session.close(), 5000);
+  };
+  context.controller.signal.addEventListener('abort', abort, { once: true });
   try {
     context.controller.signal.throwIfAborted();
     assertAnthropicSubscription(await session.accountInfo());
+    context.controller.signal.throwIfAborted();
     authorizedToSend = true;
     releaseInput();
     for await (const message of session) {
@@ -128,18 +144,34 @@ export async function runAnthropic(
       )
         context.append(message.event.delta.text);
       if (message.type === 'result') {
+        terminalSeen = true;
         for (const observation of anthropicUsage(message, selection.model))
           context.usage?.(observation);
         if (message.subtype !== 'success' || message.is_error)
           throw new Error(
             message.subtype === 'success' ? message.result : message.errors.join('\n'),
           );
+        if (
+          'terminal_reason' in message &&
+          message.terminal_reason &&
+          message.terminal_reason !== 'completed' &&
+          !context.controller.signal.aborted
+        )
+          throw new Error('Claude reply ended before natural completion.');
         completed = true;
       }
     }
+    if (context.controller.signal.aborted && authorizedToSend && !terminalSeen)
+      throw new UnconfirmedCancellationError();
     if (!completed && !context.controller.signal.aborted)
       throw new Error('Claude stream ended before completion.');
+  } catch (error) {
+    if (context.controller.signal.aborted && authorizedToSend && !terminalSeen)
+      throw new UnconfirmedCancellationError();
+    throw error;
   } finally {
+    clearTimeout(cancellationTimer);
+    context.controller.signal.removeEventListener('abort', abort);
     releaseInput();
     session.close();
   }

@@ -116,7 +116,6 @@ export class MaestroService implements OnModuleDestroy {
   private readonly active = new Map<string, ActiveTurn>();
   private readonly persistenceErrors = new Map<string, string>();
   private readonly listeners = new Map<string, Set<(snapshot: MaestroSnapshot) => void>>();
-  private readonly timers = new Set<ReturnType<typeof setInterval>>();
   private readonly runtimes = new Map<string, { runtime: AgentRuntime; checked: number }>();
   private destroyed = false;
   private readonly store: MaestroStore;
@@ -154,7 +153,6 @@ export class MaestroService implements OnModuleDestroy {
       active: new Map(),
       persistenceErrors: new Map(),
       listeners: new Map(),
-      timers: new Set(),
       runtimes: new Map(),
       destroyed: false,
     }) as MaestroService;
@@ -267,19 +265,14 @@ export class MaestroService implements OnModuleDestroy {
       this.listeners.set(runId, listeners);
       listeners.add(send);
       send(this.snapshot(runId));
-      let sequence = this.chat.correspondence(runId, 0, 1).through;
-      const timer = setInterval(() => {
-        const latest = this.chat.correspondence(runId, 0, 1).through;
-        if (latest !== sequence) {
-          sequence = latest;
-          send(this.snapshot(runId));
-        }
-      }, 1000);
-      timer.unref();
-      this.timers.add(timer);
+      const unsubscribe =
+        'committed' in this.chat && typeof this.chat.committed === 'function'
+          ? this.chat.committed((id: string) => {
+              if (id === runId) send(this.snapshot(runId));
+            })
+          : () => {};
       return () => {
-        clearInterval(timer);
-        this.timers.delete(timer);
+        unsubscribe();
         listeners.delete(send);
         if (!listeners.size) this.listeners.delete(runId);
       };
@@ -631,8 +624,6 @@ export class MaestroService implements OnModuleDestroy {
   async onModuleDestroy() {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.timers.forEach(clearInterval);
-    this.timers.clear();
     const turns = [...this.active.values()];
     turns.forEach((turn) => turn.controller.abort());
     await Promise.allSettled(turns.map((turn) => turn.promise));

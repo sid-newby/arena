@@ -247,4 +247,38 @@ describe('Configured Codex role sessions', () => {
     expect(turn.saveSession).not.toHaveBeenCalled();
     expect(calls.some((call) => call.method === 'turn/start')).toBe(false);
   });
+  it('marks cancellation unconfirmed when the provider disconnects before its terminal notification', async () => {
+    const server = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(),
+    });
+    const turn = context();
+    server.stdin.on('data', (data) => {
+      const call = JSON.parse(String(data));
+      if (typeof call.id !== 'number') return;
+      const result =
+        call.method === 'account/read'
+          ? { account: { type: 'chatgpt' } }
+          : call.method === 'thread/start'
+            ? { model: 'gpt-6-luna', thread: { id: 'thread-one' } }
+            : {};
+      queueMicrotask(() => {
+        server.stdout.write(JSON.stringify({ id: call.id, result }) + '\n');
+        if (call.method === 'turn/start') {
+          server.stdout.write(
+            JSON.stringify({
+              method: 'turn/started',
+              params: { threadId: 'thread-one', turn: { id: 'turn-one' } },
+            }) + '\n',
+          );
+          queueMicrotask(() => turn.controller.abort());
+        }
+        if (call.method === 'turn/interrupt') server.emit('exit', 1);
+      });
+    });
+    fake.spawn.mockReturnValue(server);
+    await expect(runCodex(turn, '/tmp')).rejects.toThrow('did not acknowledge cancellation');
+  });
 });
