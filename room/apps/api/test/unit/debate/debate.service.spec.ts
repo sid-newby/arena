@@ -254,6 +254,39 @@ describe('Reviewed debate lifecycle', () => {
     expect(send).toHaveBeenCalledOnce();
     expect(debate.feedbackDelivery(runId)).toEqual({ failed: 0 });
   });
+  describe.skipIf(process.platform !== 'darwin' || process.env.ROOM_SANDBOX_TESTS !== '1')(
+    'folder evidence',
+    () => {
+      it('gives both analysis seats the same current Markdown file from an ordinary folder', async () => {
+        const folder = join(realpathSync(directory), 'evidence');
+        mkdirSync(folder);
+        writeFileSync(join(folder, 'issues.md'), '| D01 | Pending bootstrap |');
+        const draft = debate.saveTask(runId, {
+          expectedRevision: chat.run(runId).revision,
+          task: { ...task, question: 'Discuss D01 in issues.md.', evidenceFolder: folder },
+        });
+        const prepared = await debate.prepare(runId, { expectedRevision: draft.revision });
+        expect(prepared).toMatchObject({ phase: 'ready' });
+        expect(existsSync(join(folder, '.git'))).toBe(false);
+        rmSync(folder, { recursive: true });
+        execute = async (_seat, context) => {
+          const file = JSON.parse(await context.tool('read_file', { path: 'issues.md' }));
+          context.append(file.text);
+        };
+        await debate.start(runId, {
+          expectedRevision: prepared.revision,
+          requestId: 'debate-from-folder',
+        });
+        await vi.waitFor(() => expect(debate.snapshot(runId).phase).toBe('awaiting-comparison'), {
+          timeout: 5000,
+        });
+        for (const seat of ['a', 'b'] as const)
+          expect(chat.snapshot(seat, runId).messages.at(-1)?.text).toBe(
+            '| D01 | Pending bootstrap |',
+          );
+      });
+    },
+  );
   it('stores each saved goal and the resolved source commit as independent task revisions', async () => {
     const source = join(directory, 'source');
     mkdirSync(source);

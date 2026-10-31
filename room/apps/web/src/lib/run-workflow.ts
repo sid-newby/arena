@@ -114,6 +114,16 @@ export function parseTask(value: unknown): TaskDraft {
   )
     throw new Error('The project directory could not be read.');
   const source = parseSource(value.source);
+  if (
+    value.evidenceFolder !== undefined &&
+    (typeof value.evidenceFolder !== 'string' ||
+      !value.evidenceFolder.trim() ||
+      value.profile !== 'analysis' ||
+      source ||
+      value.scaffold ||
+      value.projectDirectory)
+  )
+    throw new Error('The evidence folder selection is invalid.');
   let scaffold: TaskDraft['scaffold'];
   if (value.scaffold !== undefined) {
     if (
@@ -138,6 +148,7 @@ export function parseTask(value: unknown): TaskDraft {
     criteria: [...value.criteria],
     grounding: [...value.grounding],
     source,
+    ...(typeof value.evidenceFolder === 'string' ? { evidenceFolder: value.evidenceFolder } : {}),
     ...(typeof value.projectDirectory === 'string'
       ? { projectDirectory: value.projectDirectory }
       : {}),
@@ -320,6 +331,7 @@ export function cleanTask(task: TaskDraft): TaskDraft {
     expectedArtifact: task.expectedArtifact.trim(),
     criteria: task.criteria.map((line) => line.trim()).filter(Boolean),
     grounding: task.grounding.map((line) => line.trim()).filter(Boolean),
+    evidenceFolder: task.evidenceFolder?.trim() || undefined,
     projectDirectory: task.projectDirectory?.trim() || undefined,
     source: task.source?.repository.trim()
       ? {

@@ -25,10 +25,15 @@ import type { MaestroRunToolProvider } from '../maestro/maestro.service.js';
 import { CommandSandbox } from '../tools/command-sandbox.js';
 import { ToolBroker } from '../tools/tool-broker.js';
 import { parseProviderConfig } from '../runs/provider-config.js';
-import { WorkspaceLocationError, WorkspaceManager } from '../workspaces/workspace-manager.js';
+import {
+  WorkspaceLocationError,
+  WorkspaceManager,
+  type WorkspaceSource,
+} from '../workspaces/workspace-manager.js';
 import { workspacePaths } from '../workspaces/workspace-paths.js';
 import { WorkspaceLifecycle } from '../workspaces/workspace-lifecycle.js';
 import { prepareScaffoldSeed } from '../scaffolds/scaffold-seed.js';
+import { prepareEvidenceSeed } from '../workspaces/evidence-folder.js';
 import { RetainedWorkspaces } from '../workspaces/retained-workspaces.js';
 import {
   DEBATE_SEATS,
@@ -392,10 +397,11 @@ export class DebateService implements OnModuleDestroy {
       record.task &&
       (JSON.stringify(record.task.source) !== JSON.stringify(task.source) ||
         JSON.stringify(record.task.scaffold) !== JSON.stringify(task.scaffold) ||
-        record.task.projectDirectory !== task.projectDirectory)
+        record.task.projectDirectory !== task.projectDirectory ||
+        record.task.evidenceFolder !== task.evidenceFolder)
     )
       throw new ConflictException(
-        'Prepared source commits are immutable. Create a new run for another source.',
+        'This run already has its evidence. Create a new run to choose a different source.',
       );
     this.persistence.revise(runId, expectedRevision, () => {
       this.workflows.update(runId, { task, phase: 'draft', error: undefined }, 'task.updated');
@@ -462,18 +468,27 @@ export class DebateService implements OnModuleDestroy {
           })
         : undefined;
       if (!ownsPreparation()) return superseded();
-      const seed = task.scaffold ? await prepareScaffoldSeed(this.root, task.scaffold) : undefined;
-      let source = seed
-        ? { repository: seed.repository, revision: seed.revision }
-        : (task.source ??
-          (projectDirectory ? { repository: projectDirectory, revision: 'HEAD' } : null));
+      const scaffoldSeed = task.scaffold
+        ? await prepareScaffoldSeed(this.root, task.scaffold)
+        : undefined;
+      let seed: WorkspaceSource | undefined = scaffoldSeed;
+      if (task.evidenceFolder) {
+        seed =
+          this.manager.get(runId)?.source ??
+          (await prepareEvidenceSeed(this.root, this.manager.managedRoot, task.evidenceFolder));
+      }
+      if (!ownsPreparation()) return superseded();
+      let source =
+        seed ??
+        task.source ??
+        (projectDirectory ? { repository: projectDirectory, revision: 'HEAD' } : null);
       const resolvedTask =
-        seed && task.scaffold
-          ? { ...task, scaffold: { id: task.scaffold.id, digest: seed.digest } }
+        scaffoldSeed && task.scaffold
+          ? { ...task, scaffold: { id: task.scaffold.id, digest: scaffoldSeed.digest } }
           : task;
-      if (source) {
+      if (source && !seed) {
         let emptyProject = false;
-        if (!seed && source.revision === 'HEAD') {
+        if (source.revision === 'HEAD') {
           try {
             emptyProject = await canInitializeProject(source.repository);
           } catch {}
@@ -511,20 +526,16 @@ export class DebateService implements OnModuleDestroy {
         const revision = result.stdout.trim();
         if (!/^[a-f0-9]{40,64}$/.test(revision))
           throw new Error('Git did not resolve an immutable source commit.');
-        if (!seed) {
-          const root = await executeFile(
-            'git',
-            ['-C', source.repository, 'rev-parse', '--show-toplevel'],
-            { encoding: 'utf8', timeout: 10000, maxBuffer: 4096 },
-          );
-          if (realpathSync(root.stdout.trim()) !== realpathSync(source.repository))
-            throw new Error('Choose the repository root, not a folder inside it.');
-          if (!projectDirectory) {
-            const previous = this.manager.get(runId);
-            projectDirectory = previous
-              ? previous.projectDirectory
-              : realpathSync(source.repository);
-          }
+        const root = await executeFile(
+          'git',
+          ['-C', source.repository, 'rev-parse', '--show-toplevel'],
+          { encoding: 'utf8', timeout: 10000, maxBuffer: 4096 },
+        );
+        if (realpathSync(root.stdout.trim()) !== realpathSync(source.repository))
+          throw new Error('Choose the repository root, not a folder inside it.');
+        if (!projectDirectory) {
+          const previous = this.manager.get(runId);
+          projectDirectory = previous ? previous.projectDirectory : realpathSync(source.repository);
         }
         source = { repository: source.repository, revision };
       }
@@ -563,7 +574,11 @@ export class DebateService implements OnModuleDestroy {
             },
             'workflow.ready',
           );
-          if (seed || JSON.stringify(task.source) !== JSON.stringify(prepared.source))
+          if (
+            scaffoldSeed ||
+            (!task.evidenceFolder &&
+              JSON.stringify(task.source) !== JSON.stringify(prepared.source))
+          )
             this.persistence.state.recordTask(
               runId,
               { ...resolvedTask, source: seed ? null : prepared.source },
@@ -672,7 +687,10 @@ export class DebateService implements OnModuleDestroy {
   private prompt(runId: string, seat: SeatId, stage: WorkflowStage) {
     const task = this.workflows.read(runId).task;
     if (!task) throw new Error('Task is missing.');
-    const brief = `Sid started a reviewed ${task.mode} task. You occupy seat ${seat.toUpperCase()}.\nQuestion: ${task.question}\nExpected artifact: ${task.expectedArtifact}\nSuccess criteria: ${JSON.stringify(task.criteria)}\nShared grounding: ${JSON.stringify(task.grounding)}\nTool profile: ${task.profile}. Use web search and Context7 for research when useful. Use only your own workspace and provided tools. Publish completed text directly with publish_text_artifact, supplying its relative filename and text. This works in analysis mode without writing a workspace file. Publish existing workspace files with publish_artifact.\n`;
+    const evidenceInstructions = task.evidenceFolder
+      ? `Your workspace contains a snapshot of ${JSON.stringify(task.evidenceFolder)}. Treat that folder as the workspace root. For a path under that folder, give read_file its relative path. If a requested file is missing, tell Sid before relying on a substitute.\n`
+      : '';
+    const brief = `${evidenceInstructions}Sid started a reviewed ${task.mode} task. You occupy seat ${seat.toUpperCase()}.\nQuestion: ${task.question}\nExpected artifact: ${task.expectedArtifact}\nSuccess criteria: ${JSON.stringify(task.criteria)}\nShared grounding: ${JSON.stringify(task.grounding)}\nTool profile: ${task.profile}. Use web search and Context7 for research when useful. Use only your own workspace and provided tools. Publish completed text directly with publish_text_artifact, supplying its relative filename and text. This works in analysis mode without writing a workspace file. Publish existing workspace files with publish_artifact.\n`;
     if (stage === 'independent')
       return (
         brief +
@@ -1211,6 +1229,11 @@ export class DebateService implements OnModuleDestroy {
                     additionalProperties: false,
                   },
                 ],
+              },
+              evidenceFolder: {
+                type: 'string',
+                description:
+                  'Optional existing folder Sid named for a read-only debate. Use source null to include its current files.',
               },
               profile: { type: 'string', enum: ['analysis', 'build'] },
               maxHandoffs: { type: 'integer', minimum: 0, maximum: 8 },

@@ -84,6 +84,7 @@ export interface TaskDraft {
   criteria: string[];
   grounding: string[];
   source: { repository: string; revision: string } | null;
+  evidenceFolder?: string;
   projectDirectory?: string;
   scaffold?: { id: string; digest?: string };
   profile: 'analysis' | 'build';
