@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  realpathSync,
+  readFileSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatService } from '../../../src/chat/chat.service.js';
@@ -131,6 +139,51 @@ describe('Reviewed debate lifecycle', () => {
     expect(() => debate.snapshot(runId)).toThrow(
       'Workspace manifest root does not match its owner.',
     );
+  });
+  it('keeps saved outputs readable when the original project is deleted', async () => {
+    const parent = join(realpathSync(directory), 'original');
+    mkdirSync(parent);
+    const projectDirectory = join(parent, 'project');
+    const draft = debate.saveTask(runId, {
+      expectedRevision: chat.run(runId).revision,
+      task: { ...task, projectDirectory },
+    });
+    const prepared = await debate.prepare(runId, { expectedRevision: draft.revision });
+    expect(prepared.phase).toBe('ready');
+    const workspace = manager.workspace(runId, 'a');
+    writeFileSync(join(workspace.root, 'private.txt'), 'Keep this workspace intact.');
+    const artifact = manager.publish({
+      workspace,
+      turnId: 'saved-turn',
+      path: 'result.md',
+      content: Buffer.from('An immutable result.'),
+    });
+    const manifest = join(manager.controlRoot, 'runs', runId, 'workspaces.json');
+    const originalManifest = readFileSync(manifest, 'utf8');
+    const history = store.runs.state.get(runId).taskRevisions;
+    rmSync(parent, { recursive: true });
+
+    const snapshot = debate.snapshot(runId);
+    expect(snapshot.phase).toBe('ready');
+    expect(snapshot.task).toEqual(prepared.task);
+    expect(snapshot.workspaces).toBeNull();
+    expect(snapshot.workspaceError).toContain(projectDirectory);
+    expect(snapshot.workspaceError).toContain('Create a new run');
+    expect(snapshot.artifacts).toContainEqual(expect.objectContaining({ id: artifact.id }));
+    expect(debate.artifact(runId, artifact.id).content.toString()).toBe('An immutable result.');
+    expect(store.runs.state.get(runId).taskRevisions).toEqual(history);
+    expect(() => manager.workspace(runId, 'a')).toThrow('Create a new run');
+    expect(() => manager.retain(runId)).toThrow('Create a new run');
+    expect(readFileSync(manifest, 'utf8')).toBe(originalManifest);
+    expect(readFileSync(join(workspace.root, 'private.txt'), 'utf8')).toBe(
+      'Keep this workspace intact.',
+    );
+    expect(existsSync(projectDirectory)).toBe(false);
+    writeFileSync(parent, 'Unrelated file.');
+    expect(() => debate.snapshot(runId)).toThrow(
+      'Project paths cannot contain symbolic links or files.',
+    );
+    expect(readFileSync(parent, 'utf8')).toBe('Unrelated file.');
   });
   it('delivers one durable feedback event when both independent results finish', async () => {
     const value = await ready();
