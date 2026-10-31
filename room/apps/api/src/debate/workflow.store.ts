@@ -23,6 +23,7 @@ export interface WorkflowRecord {
   pauseRequested: boolean;
   handoffs: number;
   error?: string;
+  evidenceFolderFromPrompt?: true;
   proposedSeats?: Record<SeatId, import('../runs/run.contract.js').ProviderConfig>;
 }
 export function object(value: unknown): value is Record<string, unknown> {
@@ -210,7 +211,8 @@ export class WorkflowStore {
       typeof value.pauseRequested !== 'boolean' ||
       typeof value.handoffs !== 'number' ||
       !Number.isSafeInteger(value.handoffs) ||
-      (value.error !== undefined && typeof value.error !== 'string')
+      (value.error !== undefined && typeof value.error !== 'string') ||
+      (value.evidenceFolderFromPrompt !== undefined && value.evidenceFolderFromPrompt !== true)
     )
       throw new Error('Stored workflow state is invalid.');
     const turns = value.turns;
@@ -251,6 +253,7 @@ export class WorkflowStore {
       handoffs: value.handoffs,
       ...(value.error ? { error: value.error } : {}),
       ...(proposedSeats ? { proposedSeats } : {}),
+      ...(value.evidenceFolderFromPrompt === true ? { evidenceFolderFromPrompt: true } : {}),
     };
   }
   write(id: string, record: WorkflowRecord) {

@@ -1388,8 +1388,8 @@ export function useRunSetup({
                   <FolderOpen aria-hidden="true" /> Browse folders
                 </Button>
                 <p id={`${fieldPrefix}-evidence-help`} className="run-muted">
-                  Both seats can read the current files in this folder, including uncommitted
-                  changes.
+                  Both seats get the current files, including uncommitted changes. You can also
+                  paste a project path from the room’s evidence locker into your question.
                 </p>
                 {visible.workspaces && (
                   <p className="run-muted">
@@ -1443,6 +1443,46 @@ export function useRunSetup({
                 </p>
               </div>
             ) : null}
+            <div>
+              <div className="run-model-grid">
+                {(['a', 'b'] as const).map((seat) => (
+                  <RunSeatModel
+                    key={seat}
+                    seat={seat}
+                    value={draft.seats[seat]}
+                    catalogs={catalogs}
+                    onChange={(value) =>
+                      edit((previous) => ({
+                        ...previous,
+                        seats: { ...previous.seats, [seat]: value },
+                      }))
+                    }
+                  />
+                ))}
+              </div>
+              {catalogError && <p className="run-error">{catalogError}</p>}
+              {(['codex', 'anthropic'] as const).map(
+                (provider) =>
+                  catalogs[provider]?.status === 'unavailable' && (
+                    <p className="run-error" key={provider}>
+                      {provider === 'codex' ? 'Codex' : 'Anthropic'}:{' '}
+                      {catalogs[provider]?.reason || 'Unavailable'}
+                    </p>
+                  ),
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setCatalogError(undefined);
+                  setCatalogVersion((value) => value + 1);
+                }}
+              >
+                <RefreshCw />
+                Refresh subscribed models
+              </Button>
+            </div>
             {simpleTask && (
               <div className="run-buttons">
                 <Button
@@ -1457,9 +1497,6 @@ export function useRunSetup({
                 >
                   <Play aria-hidden="true" /> Start debate
                 </Button>
-                <p className="run-muted">
-                  A: {draft.seats.a.model} · B: {draft.seats.b.model}
-                </p>
               </div>
             )}
             <details
@@ -1585,46 +1622,6 @@ export function useRunSetup({
                       />
                     </label>
                   </div>
-                </div>
-                <div>
-                  <div className="run-model-grid">
-                    {(['a', 'b'] as const).map((seat) => (
-                      <RunSeatModel
-                        key={seat}
-                        seat={seat}
-                        value={draft.seats[seat]}
-                        catalogs={catalogs}
-                        onChange={(value) =>
-                          edit((previous) => ({
-                            ...previous,
-                            seats: { ...previous.seats, [seat]: value },
-                          }))
-                        }
-                      />
-                    ))}
-                  </div>
-                  {catalogError && <p className="run-error">{catalogError}</p>}
-                  {(['codex', 'anthropic'] as const).map(
-                    (provider) =>
-                      catalogs[provider]?.status === 'unavailable' && (
-                        <p className="run-error" key={provider}>
-                          {provider === 'codex' ? 'Codex' : 'Anthropic'}:{' '}
-                          {catalogs[provider]?.reason || 'Unavailable'}
-                        </p>
-                      ),
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setCatalogError(undefined);
-                      setCatalogVersion((value) => value + 1);
-                    }}
-                  >
-                    <RefreshCw />
-                    Refresh subscribed models
-                  </Button>
                 </div>
                 <div>
                   <fieldset disabled={Boolean(visible.workspaces)}>

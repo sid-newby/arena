@@ -126,6 +126,7 @@ export interface WorkflowSnapshot {
   artifacts: ArtifactMetadata[];
   retrySeats: SeatId[];
   busy: boolean;
+  evidenceFolderFromPrompt?: true;
   workspaceError?: string;
   error?: string;
   proposal?: ActionProposal;

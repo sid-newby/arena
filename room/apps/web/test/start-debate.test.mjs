@@ -57,7 +57,12 @@ function fixture(initial = snapshot()) {
       if (path === '/workflow') return parse(saved);
       assert.equal(body.expectedRevision, saved.revision, `stale revision at ${path}`);
       if (path === '/configurations') {
-        saved = { ...saved, revision: saved.revision + 1, seats: body.seats };
+        saved = {
+          ...saved,
+          phase: saved.task ? 'draft' : saved.phase,
+          revision: saved.revision + 1,
+          seats: body.seats,
+        };
         return parse({ id: runId, revision: saved.revision });
       }
       if (path === '/task')
@@ -122,6 +127,20 @@ test('a lost prepare response retries from the ready snapshot without preparing 
   assert.equal(run.calls.filter(({ path }) => path === '/start').length, 1);
 });
 
+test('changing models on a prepared debate prepares the new seats before starting', async () => {
+  const run = fixture(snapshot({ task, phase: 'ready', workspaces: workspace }));
+  const selected = {
+    a: { ...seats.a, model: 'gpt-6-astra' },
+    b: { ...seats.b, model: 'claude-fable-5-1' },
+  };
+  const result = await startDebate({ ...run.options, seats: selected });
+  assert.deepEqual(result.seats, selected);
+  assert.deepEqual(
+    run.calls.map((call) => call.path),
+    ['/workflow', '/configurations', '/prepare', '/start'],
+  );
+});
+
 test('lost model and task save responses reconcile exact committed settings on retry', async () => {
   for (const lostPath of ['/configurations', '/task']) {
     const run = fixture();
@@ -155,6 +174,34 @@ test('a lost start response never redispatches work after reconnect', async () =
   const result = await startDebate(run.options);
   assert.equal(result.phase, 'independent');
   assert.equal(run.calls.filter(({ path }) => path === '/start').length, 1);
+});
+
+test('retry accepts a locker folder resolved from the same question but rejects a concurrently selected folder', async () => {
+  const draft = { ...task, evidenceFolder: undefined };
+  for (const inferred of [true, false]) {
+    const run = fixture();
+    run.saved = snapshot({
+      revision: 4,
+      phase: 'ready',
+      workspaces: workspace,
+      task,
+      ...(inferred ? { evidenceFolderFromPrompt: true } : {}),
+    });
+    const launch = startDebate({ ...run.options, task: draft });
+    if (inferred) {
+      assert.equal((await launch).phase, 'independent');
+      assert.deepEqual(
+        run.calls.map((call) => call.path),
+        ['/workflow', '/start'],
+      );
+    } else {
+      await assert.rejects(launch, /saved run changed/);
+      assert.deepEqual(
+        run.calls.map((call) => call.path),
+        ['/workflow'],
+      );
+    }
+  }
 });
 
 test('a failed folder preparation can be fixed and started in the same run', async () => {

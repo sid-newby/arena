@@ -166,6 +166,9 @@ local files, pick an optional **Evidence folder** first. Both seats can read the
 same snapshot of its current files, including uncommitted Markdown and code.
 For example, select your project folder and ask “Does D01 in
 `dead-opus/issues-final.md` match the implementation?” A plain folder works.
+If you paste an absolute project or file path under `room/evidence/` in the
+question, Arena can attach that locker project when the Evidence folder field
+is blank. Both seats see paths relative to the project root.
 Use a small project folder (up to 20 MiB of included files, 5 MiB per file).
 The copy skips hidden files, links, dependencies, build output, and common
 credential files. Use the relative paths inside the folder in your question.

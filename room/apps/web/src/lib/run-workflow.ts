@@ -252,6 +252,11 @@ export function parseWorkflow(value: unknown, runId: string): WorkflowSnapshot {
   )
     throw new Error('The run returned an unreadable update. Reload its saved state.');
   const task = value.task === null ? null : parseTask(value.task);
+  if (
+    value.evidenceFolderFromPrompt !== undefined &&
+    (value.evidenceFolderFromPrompt !== true || !task?.evidenceFolder)
+  )
+    throw new Error('The saved evidence folder could not be verified.');
   if (task === null && !['draft', 'stopped'].includes(value.phase))
     throw new Error('The run has no reviewed task for its current phase.');
   let workspaces: WorkflowSnapshot['workspaces'] = null;
@@ -287,6 +292,7 @@ export function parseWorkflow(value: unknown, runId: string): WorkflowSnapshot {
     task,
     seats: { a: parseProvider(value.seats.a), b: parseProvider(value.seats.b) },
     workspaces,
+    ...(value.evidenceFolderFromPrompt === true ? { evidenceFolderFromPrompt: true as const } : {}),
     artifacts: value.artifacts.map((entry) => parseArtifact(entry, runId)),
     busy: value.busy,
     retrySeats: parseRetrySeats(value.retrySeats),

@@ -56,19 +56,30 @@ export async function startDebate({
   onProgress: (label: string) => void;
   request?: typeof workflowRequest;
 }): Promise<WorkflowSnapshot> {
-  const task = cleanTask(draft);
+  let task = cleanTask(draft);
   if (!isSimpleDebate(task)) throw new Error('Use advanced settings for this task configuration.');
   const runId = baseline.runId;
   const parse = (value: unknown) => parseWorkflow(value, runId);
   let current = await request(runId, '/workflow', parse, undefined, signal);
   assertCurrent();
+  if (
+    current.evidenceFolderFromPrompt &&
+    current.workspaces &&
+    current.task?.evidenceFolder &&
+    !baseline.workspaces &&
+    !baseline.task?.evidenceFolder &&
+    !task.evidenceFolder
+  ) {
+    const resolved = { ...task, evidenceFolder: current.task.evidenceFolder };
+    if (sameTask(current.task, resolved)) task = resolved;
+  }
   const saved = sameTask(current.task, task) && sameSeats(current.seats, seats);
   const configuredOnly =
     current.revision === expectedRevision + 1 &&
     !sameSeats(baseline.seats, seats) &&
     sameSeats(current.seats, seats) &&
     sameTask(current.task, baseline.task) &&
-    current.phase === baseline.phase;
+    current.phase === (baseline.task ? 'draft' : baseline.phase);
   if (current.revision !== expectedRevision && !saved && !configuredOnly)
     throw new Error('The saved run changed. Review the saved settings before starting.');
   if (current.workspaceError) throw new Error(current.workspaceError);
@@ -97,7 +108,13 @@ export async function startDebate({
       signal,
     );
     assertCurrent();
-    current = { ...current, revision: configured.revision, seats };
+    // Changing a seat resets a configured workflow to draft so its new binding can be prepared.
+    current = {
+      ...current,
+      phase: current.task ? 'draft' : current.phase,
+      revision: configured.revision,
+      seats,
+    };
     onRevision(current.revision);
   }
   if (!sameTask(current.task, task) || current.phase === 'failed') {

@@ -34,6 +34,11 @@ import { workspacePaths } from '../workspaces/workspace-paths.js';
 import { WorkspaceLifecycle } from '../workspaces/workspace-lifecycle.js';
 import { prepareScaffoldSeed } from '../scaffolds/scaffold-seed.js';
 import { prepareEvidenceSeed } from '../workspaces/evidence-folder.js';
+import {
+  evidencePathExamples,
+  resolveLockerEvidence,
+  verifyEvidenceReferences,
+} from '../workspaces/locker-evidence.js';
 import { RetainedWorkspaces } from '../workspaces/retained-workspaces.js';
 import {
   DEBATE_SEATS,
@@ -363,6 +368,7 @@ export class DebateService implements OnModuleDestroy {
       revision: run.revision,
       phase: record.phase,
       task: record.task,
+      ...(record.evidenceFolderFromPrompt ? { evidenceFolderFromPrompt: true } : {}),
       seats: run.seats,
       workspaces: workspaces
         ? {
@@ -404,7 +410,19 @@ export class DebateService implements OnModuleDestroy {
         'This run already has its evidence. Create a new run to choose a different source.',
       );
     this.persistence.revise(runId, expectedRevision, () => {
-      this.workflows.update(runId, { task, phase: 'draft', error: undefined }, 'task.updated');
+      this.workflows.update(
+        runId,
+        {
+          task,
+          phase: 'draft',
+          error: undefined,
+          evidenceFolderFromPrompt:
+            record.evidenceFolderFromPrompt && task.evidenceFolder === record.task?.evidenceFolder
+              ? true
+              : undefined,
+        },
+        'task.updated',
+      );
       this.persistence.state.recordTask(runId, task, 'draft-save');
     });
     this.chat.refreshRun(runId);
@@ -421,7 +439,7 @@ export class DebateService implements OnModuleDestroy {
       record.phase === 'preparing'
     )
       throw new ConflictException('Save an idle task draft before preparing it.');
-    const task = record.task;
+    let task = record.task;
     const preparing = this.persistence.revise(runId, expectedRevision, () =>
       this.workflows.update(runId, { phase: 'preparing', error: undefined }, 'workflow.preparing'),
     );
@@ -439,6 +457,14 @@ export class DebateService implements OnModuleDestroy {
       return this.snapshot(runId);
     };
     try {
+      task = parseTask(
+        resolveLockerEvidence(
+          workspacePaths().roomRoot,
+          task,
+          Boolean(task.evidenceFolder && this.manager.get(runId)?.source),
+        ),
+      );
+      const inferredEvidence = !record.task.evidenceFolder && Boolean(task.evidenceFolder);
       const run = this.chat.run(runId);
       for (const seat of DEBATE_SEATS) {
         const selected = run.seats[seat],
@@ -478,6 +504,18 @@ export class DebateService implements OnModuleDestroy {
           (await prepareEvidenceSeed(this.root, this.manager.managedRoot, task.evidenceFolder));
       }
       if (!ownsPreparation()) return superseded();
+      if (task.evidenceFolder && seed) {
+        await verifyEvidenceReferences(task.evidenceFolder, task.question, seed);
+        if (!ownsPreparation()) return superseded();
+        if (inferredEvidence) {
+          this.workflows.update(
+            runId,
+            { task, evidenceFolderFromPrompt: true },
+            'workflow.evidence-resolved',
+          );
+          this.persistence.state.recordTask(runId, task, 'resolved-source');
+        }
+      }
       let source =
         seed ??
         task.source ??
@@ -565,6 +603,8 @@ export class DebateService implements OnModuleDestroy {
             runId,
             {
               phase: 'ready',
+              evidenceFolderFromPrompt:
+                inferredEvidence || record.evidenceFolderFromPrompt || undefined,
               task: {
                 ...resolvedTask,
                 ...(projectDirectory ? { projectDirectory } : {}),
@@ -688,7 +728,7 @@ export class DebateService implements OnModuleDestroy {
     const task = this.workflows.read(runId).task;
     if (!task) throw new Error('Task is missing.');
     const evidenceInstructions = task.evidenceFolder
-      ? `Your workspace contains a snapshot of ${JSON.stringify(task.evidenceFolder)}. Treat that folder as the workspace root. For a path under that folder, give read_file its relative path. If a requested file is missing, tell Sid before relying on a substitute.\n`
+      ? `Your workspace contains a snapshot of ${JSON.stringify(task.evidenceFolder)}. Treat that folder as the workspace root. For a path under that folder, give read_file its relative path. If a requested file is missing, tell Sid before relying on a substitute.\n${evidencePathExamples(task.evidenceFolder, task.question)}`
       : '';
     const brief = `${evidenceInstructions}Sid started a reviewed ${task.mode} task. You occupy seat ${seat.toUpperCase()}.\nQuestion: ${task.question}\nExpected artifact: ${task.expectedArtifact}\nSuccess criteria: ${JSON.stringify(task.criteria)}\nShared grounding: ${JSON.stringify(task.grounding)}\nTool profile: ${task.profile}. Use web search and Context7 for research when useful. Use only your own workspace and provided tools. Publish completed text directly with publish_text_artifact, supplying its relative filename and text. This works in analysis mode without writing a workspace file. Publish existing workspace files with publish_artifact.\n`;
     if (stage === 'independent')

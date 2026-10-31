@@ -85,6 +85,7 @@ describe('Reviewed debate lifecycle', () => {
     debate = DebateService.forTest(chat, manager);
   });
   afterEach(async () => {
+    vi.unstubAllEnvs();
     debate.onModuleDestroy();
     await chat.onModuleDestroy();
     rmSync(directory, { recursive: true, force: true });
@@ -254,9 +255,129 @@ describe('Reviewed debate lifecycle', () => {
     expect(send).toHaveBeenCalledOnce();
     expect(debate.feedbackDelivery(runId)).toEqual({ failed: 0 });
   });
+  it.each(['missing', 'ambiguous'])(
+    'rejects %s locker references before creating workspaces or dispatching seats',
+    async (kind) => {
+      const roomRoot = join(realpathSync(directory), 'room');
+      vi.stubEnv('ROOM_WORKSPACE', roomRoot);
+      const first = join(roomRoot, 'evidence', 'first');
+      const second = join(roomRoot, 'evidence', 'second');
+      mkdirSync(first, { recursive: true });
+      mkdirSync(second);
+      const question = kind === 'missing' ? `${first}/missing.md` : `${first}\n${second}`;
+      const saved = debate.saveTask(runId, {
+        expectedRevision: chat.run(runId).revision,
+        task: { ...task, question },
+      });
+      const prepared = await debate.prepare(runId, { expectedRevision: saved.revision });
+      expect(prepared.phase).toBe('failed');
+      expect(prepared.error).toContain(kind === 'missing' ? 'missing' : 'multiple locker projects');
+      expect(prepared.workspaces).toBeNull();
+      expect(manager.get(runId)).toBeUndefined();
+      await expect(
+        debate.start(runId, {
+          expectedRevision: prepared.revision,
+          requestId: `reject-locker-${kind}`,
+        }),
+      ).rejects.toThrow('unavailable');
+      expect(observed).toHaveLength(0);
+    },
+  );
   describe.skipIf(process.platform !== 'darwin' || process.env.ROOM_SANDBOX_TESTS !== '1')(
     'folder evidence',
     () => {
+      it('prepares both seats from the report and project paths pasted into the question', async () => {
+        const roomRoot = join(realpathSync(directory), 'room');
+        vi.stubEnv('ROOM_WORKSPACE', roomRoot);
+        const folder = join(roomRoot, 'evidence', 'codex-claude-bridge');
+        mkdirSync(join(folder, 'dead-opus'), { recursive: true });
+        const report = join(folder, 'dead-opus', 'issues-final.md');
+        const reportText = '| D01 | Pending bootstrap |';
+        writeFileSync(report, reportText);
+        const question = `Discuss D01 using this report and project.\n${report}\n${folder}`;
+        const draft = debate.saveTask(runId, {
+          expectedRevision: chat.run(runId).revision,
+          task: { ...task, question },
+        });
+        const prepared = await debate.prepare(runId, { expectedRevision: draft.revision });
+        expect(prepared.error).toBeUndefined();
+        expect(prepared).toMatchObject({
+          phase: 'ready',
+          evidenceFolderFromPrompt: true,
+          task: { question, evidenceFolder: folder, source: null },
+        });
+        expect(store.runs.state.get(runId).taskRevisions[0]).toMatchObject({
+          origin: 'resolved-source',
+          task: { evidenceFolder: folder, source: null },
+        });
+        rmSync(folder, { recursive: true });
+        execute = async (_seat, context) => {
+          expect(context.text).toContain('dead-opus/issues-final.md');
+          const file = JSON.parse(
+            await context.tool('read_file', { path: 'dead-opus/issues-final.md' }),
+          );
+          context.append(file.text);
+        };
+        await debate.start(runId, {
+          expectedRevision: prepared.revision,
+          requestId: 'debate-pasted-locker-report',
+        });
+        await vi.waitFor(() => expect(debate.snapshot(runId).phase).toBe('awaiting-comparison'), {
+          timeout: 5000,
+        });
+        expect(observed).toHaveLength(2);
+        for (const seat of ['a', 'b'] as const)
+          expect(chat.snapshot(seat, runId).messages.at(-1)?.text).toBe(reportText);
+      });
+      it('rejects a named generated report excluded from the snapshot before provisioning seats', async () => {
+        const roomRoot = join(realpathSync(directory), 'room');
+        vi.stubEnv('ROOM_WORKSPACE', roomRoot);
+        const folder = join(roomRoot, 'evidence', 'project');
+        mkdirSync(join(folder, 'dist'), { recursive: true });
+        const report = join(folder, 'dist', 'issues-final.md');
+        writeFileSync(report, 'A generated report that capture excludes.');
+        const saved = debate.saveTask(runId, {
+          expectedRevision: chat.run(runId).revision,
+          task: { ...task, question: `Review this report.\n${report}` },
+        });
+        const prepared = await debate.prepare(runId, { expectedRevision: saved.revision });
+        expect(prepared.phase).toBe('failed');
+        expect(prepared.error).toContain('absent from the frozen snapshot');
+        expect(prepared.workspaces).toBeNull();
+        expect(manager.get(runId)).toBeUndefined();
+        expect(observed).toHaveLength(0);
+      });
+      it('retries from the frozen report when the original locker disappears after verification fails', async () => {
+        const roomRoot = join(realpathSync(directory), 'room');
+        vi.stubEnv('ROOM_WORKSPACE', roomRoot);
+        const folder = join(roomRoot, 'evidence', 'project');
+        mkdirSync(folder, { recursive: true });
+        const report = join(folder, 'issues.md');
+        writeFileSync(report, 'Frozen report.');
+        debate.onModuleDestroy();
+        let attempts = 0;
+        debate = DebateService.forTest(chat, manager, async () => {
+          if (++attempts === 1) throw new Error('Transient tool verification failure.');
+        });
+        const saved = debate.saveTask(runId, {
+          expectedRevision: chat.run(runId).revision,
+          task: { ...task, question: `Read \`${report}\`.` },
+        });
+        const failed = await debate.prepare(runId, { expectedRevision: saved.revision });
+        expect(failed).toMatchObject({
+          phase: 'failed',
+          evidenceFolderFromPrompt: true,
+          task: { evidenceFolder: folder },
+        });
+        rmSync(folder, { recursive: true });
+        const retried = await debate.prepare(runId, { expectedRevision: failed.revision });
+        expect(retried.error).toBeUndefined();
+        expect(retried).toMatchObject({ phase: 'ready', evidenceFolderFromPrompt: true });
+        for (const seat of ['a', 'b'] as const)
+          expect(readFileSync(join(manager.workspace(runId, seat).root, 'issues.md'), 'utf8')).toBe(
+            'Frozen report.',
+          );
+      });
       it('gives both analysis seats the same current Markdown file from an ordinary folder', async () => {
         const folder = join(realpathSync(directory), 'evidence');
         mkdirSync(folder);
