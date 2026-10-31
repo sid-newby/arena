@@ -17,10 +17,10 @@ import { projectPath } from './project-directory.js';
 
 export type WorkspaceSeat = 'a' | 'b';
 export class WorkspaceLocationError extends Error {
-  constructor() {
-    super(
-      'These workspaces belong to another application location. Open the original installation to manage them. Saved outputs remain available here.',
-    );
+  constructor(
+    message = 'These workspaces belong to another application location. Open the original installation to manage them. Saved outputs remain available here.',
+  ) {
+    super(message);
   }
 }
 export interface WorkspaceSource {
@@ -224,7 +224,11 @@ export class WorkspaceManager {
         typeof value.projectIdentity.ino !== 'number'
       )
         throw new Error('Invalid project ownership in workspace manifest.');
-      const stat = lstatSync(value.projectDirectory as string);
+      const stat = lstatSync(value.projectDirectory as string, { throwIfNoEntry: false });
+      if (!stat)
+        throw new WorkspaceLocationError(
+          `The original project folder is missing at ${value.projectDirectory}. Saved outputs remain available. Create a new run with an available project folder to continue working.`,
+        );
       if (
         stat.isSymbolicLink() ||
         !stat.isDirectory() ||
