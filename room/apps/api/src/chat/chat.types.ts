@@ -1,3 +1,4 @@
+import type { MessageReceipt } from './message.contract.js';
 import type { Narration } from '../speech/narration.js';
 import type { TokenCounts, UsageObservation } from '../state/state.contract.js';
 import type { PanelExpression } from './panel-expression.js';
@@ -41,6 +42,7 @@ export interface ChatSnapshot {
     delivery?: PanelistDelivery;
   }[];
   pendingPanelistMessages: number;
+  humanMessages?: MessageReceipt[];
   activeSource?: 'human' | 'panelist';
   status: 'idle' | 'working' | 'failed';
   error?: string;
@@ -73,6 +75,7 @@ export interface TurnContext {
   tools?: RuntimeToolDefinition[];
   instructions?: string;
   text: string;
+  mode?: 'side';
   session?: string;
   toolVersion?: number;
   priorHistory?: HistoryTurn[];
@@ -98,8 +101,10 @@ export interface ChatExecutionPolicy {
     signal: AbortSignal,
   ): Promise<string | undefined>;
   submit(runId: string, source: 'human' | 'workflow'): void;
-  started(runId: string, seat: SeatId, turnId: string): void;
+  started(runId: string, seat: SeatId, turnId: string, intervention?: boolean): void;
   address(runId: string, turnId: string): void;
   drain(runId: string): boolean;
   stopped(runId: string): void;
+  intervention?(runId: string, seat: SeatId, intent: string): void;
+  messageDrain?(runId: string): boolean;
 }

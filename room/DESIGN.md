@@ -283,6 +283,10 @@ and a 48px forward / -4° pitch lean. Audience is straight on. Turns settle over
 surfaces remain outside the clipped front face; chat clipping stays inside it.
 Panel colors and typography continue to inherit the existing theme. At tablet
 widths the existing display treatment uses a 64px heading to retain chat width.
+The transparent tabpanel wrappers pass pointer targeting to their slab children,
+including portions rotated behind the wrapper plane. Keyboard tabpanel focus is
+retained. `test/panel-hit-targets.browser.mjs` checks compositor hit targets across
+all poses and compact layouts without sending messages.
 
 The shared footer exposes Audience, Peer, Lean in, and Reset per agent plus
 Recenter panels. Manual poses are local visual state; genuine existing pose
@@ -300,11 +304,24 @@ Failed, stopped, and exchange-limit outcomes include their available detail.
 A nonzero panelist inbox count appears in the receiving panel's metadata.
 
 The footer's square ghost Stop conversation action stops both model replies,
-queued deliveries, and local audio. It shows pending, success, and error feedback.
-Stop audio remains a separate playback action. During a panelist reply the
-composer retains both Stop and Send. Its caption explains that Send interrupts
-the panelist exchange to give Sid priority. Human-prompted active replies keep
-the existing Stop-only behavior. Preview never sends or stops live conversation.
+queued main and side messages, and local audio. It shows pending, success, and error feedback.
+Stop audio remains a separate playback action. The composer retains Send during
+all active replies. A native Delivery select offers After current reply,
+Interrupt and send, and Only when idle. The default queues work while a seat is
+busy; the button and caption state when it will queue or interrupt. A bounded
+receipt disclosure shows pending and recent messages, their authoritative delivery
+state, and cancellation for queued or unconfirmed work. Preview never sends or
+stops live conversation.
+The receipt disclosure starts collapsed. On narrow or short viewports, the reply
+thread retains at least 100px and the composer can scroll when receipts expand.
+
+Side conversation opens a separate Radix dialog per seat with the same square
+controls, local tokens, reply Markdown, and Message Scroller as Maestro. Its own
+draft survives closing, and its Stop action only affects side work. Use in main
+draft copies a completed conclusion without sending it. Side snapshots remain
+outside main replies and speech. Main, side, and workflow updates share one SSE
+connection; the Run tab refreshes from pushed invalidations while preserving dirty
+drafts rather than using a periodic refresh.
 
 No new color or typography tokens are introduced. Status text uses existing
 muted foreground and destructive roles. Metadata and footer utilities wrap at

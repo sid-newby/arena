@@ -47,6 +47,8 @@ import { usePanelExpression } from '@/hooks/use-panel-expression';
 import { usePanelMotion } from '@/hooks/use-panel-motion';
 import type { ExpressionSnapshot } from '@/lib/panel-expression';
 import type { ActivityFrame } from '@/lib/panel-motion';
+import { SideConversation } from '@/components/side-conversation';
+import { messagePending, receiptLabel, type MessageIntent } from '@/lib/messaging';
 import './panel-expression.css';
 
 type Props = {
@@ -57,8 +59,15 @@ type Props = {
   pose: Pose | 'lean' | undefined;
   apiError?: string;
   reconnect: () => void;
-  send: (id: AgentId, text: string, requestId: string, scope: SendScope) => Promise<void>;
+  send: (
+    id: AgentId,
+    text: string,
+    requestId: string,
+    scope: SendScope,
+    intent: MessageIntent,
+  ) => Promise<void>;
   stop: (id: AgentId) => Promise<void>;
+  cancelMessage: (id: AgentId, messageId: string) => Promise<void>;
   effectsEnabled: boolean;
   selected: boolean;
   developmentExpression?: ExpressionSnapshot;
@@ -156,6 +165,7 @@ export function AgentPanel({
   reconnect,
   send,
   stop,
+  cancelMessage,
   effectsEnabled,
   selected,
   developmentExpression,
@@ -191,6 +201,9 @@ export function AgentPanel({
       } as CSSProperties)
     : {};
   const [draft, setDraft] = useState('');
+  const input = useRef<HTMLTextAreaElement>(null);
+  const [intent, setIntent] = useState<MessageIntent>('queue');
+  const [cancelling, setCancelling] = useState<string>();
   const [destination, setDestination] = useState<'self' | 'both'>('self');
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
@@ -203,17 +216,29 @@ export function AgentPanel({
       ? { runId, revision: snapshot.revision }
       : undefined;
   const waitingTargets =
-    scope && deliveryMatches(delivery, scope, draft.trim(), targets)
+    scope && deliveryMatches(delivery, scope, draft.trim(), targets, intent)
       ? targets.filter((target) => !delivery?.delivered.has(target))
       : targets;
   const targetAvailable = (target: AgentId) =>
     agents[target].info?.status === 'ready' &&
     agents[target].connection === 'connected' &&
-    (agents[target].snapshot.status !== 'working' ||
-      agents[target].snapshot.activeSource === 'panelist') &&
+    (intent !== 'send' || agents[target].snapshot.status !== 'working') &&
     !agents[target].pending;
   const available = Boolean(scope) && waitingTargets.every(targetAvailable);
   const working = !preview && (snapshot.status === 'working' || agent.pending);
+  const busyTargets = targets.some((target) => agents[target].snapshot.status === 'working');
+  const receipts = snapshot.humanMessages ?? [];
+  const pendingMessages = receipts.filter(messagePending);
+  const latestReceipt = receipts.at(-1);
+  const visibleReceipts = receipts.filter(
+    (message) => messagePending(message) || receipts.slice(-3).includes(message),
+  );
+  const sendLabel =
+    intent === 'interrupt'
+      ? 'Interrupt and send'
+      : intent === 'queue' && busyTargets
+        ? 'Queue message'
+        : 'Send';
   const lastReply = snapshot.messages.at(-1);
   const activity: ActivityFrame = developmentActivity ?? {
     connected: !preview && agent.connection === 'connected',
@@ -251,13 +276,13 @@ export function AgentPanel({
     flight.current = true;
     setSubmitting(true);
     setError(undefined);
-    const batch = prepareDelivery(delivery, scope, text, targets, crypto.randomUUID());
+    const batch = prepareDelivery(delivery, scope, text, targets, crypto.randomUUID(), intent);
     setDelivery(batch);
     const results = await Promise.allSettled(
       batch.targets
         .filter((target) => !batch.delivered.has(target))
         .map(async (target) => {
-          await send(target, text, `${batch.requestId}-${target}`, batch);
+          await send(target, text, `${batch.requestId}-${target}`, batch, batch.intent);
           batch.delivered.add(target);
         }),
     );
@@ -300,6 +325,19 @@ export function AgentPanel({
       setError(cause instanceof Error ? cause.message : 'Could not stop the reply.');
     } finally {
       setStopping(false);
+    }
+  }
+
+  async function cancelSavedMessage(messageId: string) {
+    if (cancelling) return;
+    setCancelling(messageId);
+    setError(undefined);
+    try {
+      await cancelMessage(id, messageId);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not cancel this message.');
+    } finally {
+      setCancelling(undefined);
     }
   }
 
@@ -498,6 +536,83 @@ export function AgentPanel({
                 Authored preview. Switch Preview off to talk to an agent.
               </p>
             )}
+            <div className="message-delivery">
+              <label htmlFor={`delivery-${id}`}>
+                Delivery
+                <select
+                  id={`delivery-${id}`}
+                  value={intent}
+                  disabled={preview || submitting}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value === 'send' || value === 'queue' || value === 'interrupt')
+                      setIntent(value);
+                  }}
+                >
+                  <option value="queue">After current reply</option>
+                  <option value="interrupt">Interrupt and send</option>
+                  <option value="send">Only when idle</option>
+                </select>
+              </label>
+              <SideConversation
+                runId={runId}
+                seat={id}
+                name={accessibleName}
+                snapshot={agent.side}
+                connection={agent.connection}
+                disabled={preview}
+                error={agent.sideError}
+                reconnect={reconnect}
+                transfer={(text) => {
+                  setDraft((current) => (current.trim() ? `${current}\n\n${text}` : text));
+                  requestAnimationFrame(() => input.current?.focus());
+                }}
+              />
+            </div>
+            {!preview && visibleReceipts.length > 0 && (
+              <details className="saved-messages">
+                <summary>
+                  {pendingMessages.length
+                    ? `${pendingMessages.length} pending message${pendingMessages.length === 1 ? '' : 's'}`
+                    : 'Recent sent messages'}
+                </summary>
+                <ol>
+                  {visibleReceipts.map((message) => (
+                    <li key={message.id}>
+                      <p>{message.text}</p>
+                      <div className="saved-message-state">
+                        <span>{receiptLabel(message.status)}</span>
+                        {(message.status === 'queued' || message.status === 'uncertain') && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={Boolean(cancelling)}
+                            onClick={() => void cancelSavedMessage(message.id)}
+                          >
+                            {cancelling === message.id
+                              ? 'Cancelling…'
+                              : message.status === 'uncertain'
+                                ? 'Cancel unconfirmed message'
+                                : 'Cancel queued message'}
+                          </Button>
+                        )}
+                      </div>
+                      {message.error && <p className="side-error">{message.error}</p>}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+            {!preview && latestReceipt && (
+              <output
+                className={`saved-message-feedback${latestReceipt.status === 'failed' || latestReceipt.status === 'uncertain' ? ' side-error' : ''}`}
+                aria-live="polite"
+              >
+                {receiptLabel(latestReceipt.status)}
+                {latestReceipt.error ? ` · ${latestReceipt.error}` : ''}
+              </output>
+            )}
             <form
               noValidate
               onSubmit={(event) => {
@@ -507,6 +622,7 @@ export function AgentPanel({
             >
               <InputGroup className="composer-input">
                 <InputGroupTextarea
+                  ref={input}
                   aria-label={`Message ${accessibleName}`}
                   placeholder={preview ? 'Preview mode' : `Talk to ${name}…`}
                   value={draft}
@@ -547,7 +663,7 @@ export function AgentPanel({
                       <span>Both</span>
                     </label>
                   </fieldset>
-                  {working && (
+                  {(working || pendingMessages.length > 0) && (
                     <InputGroupButton
                       className="send-button stop-button"
                       onClick={() => void stopTurn()}
@@ -558,29 +674,31 @@ export function AgentPanel({
                       {stopping ? 'Stopping' : 'Stop'}
                     </InputGroupButton>
                   )}
-                  {(!working || snapshot.activeSource === 'panelist') && (
+                  {
                     <InputGroupButton
                       className="send-button"
                       type="submit"
                       disabled={!draft.trim() || !available || preview || submitting}
-                      aria-label={`Send to ${destination === 'both' ? `both agents from seat ${seat}` : accessibleName}`}
+                      aria-label={`${sendLabel} to ${destination === 'both' ? `both agents from seat ${seat}` : accessibleName}`}
                     >
                       {submitting ? <LoaderCircle className="spin" /> : <ArrowUpRight />}
-                      <span>{error && delivery ? 'Retry' : 'Send'}</span>
+                      <span>
+                        {submitting ? 'Saving…' : error && delivery ? 'Retry' : sendLabel}
+                      </span>
                     </InputGroupButton>
-                  )}
+                  }
                 </InputGroupAddon>
               </InputGroup>
             </form>
             <div className="composer-caption">
               <span>
-                {waitingTargets.some(
-                  (target) => agents[target].snapshot.activeSource === 'panelist',
-                )
-                  ? 'Send stops the panelist exchange and gives your message priority.'
-                  : destination === 'both'
-                    ? 'One message. Two independent replies.'
-                    : 'Your prompt goes to the selected agent.'}
+                {intent === 'interrupt'
+                  ? 'Stops the current reply before starting your message.'
+                  : intent === 'queue' && busyTargets
+                    ? 'Saved immediately. Starts after the current reply.'
+                    : destination === 'both'
+                      ? 'One message. Two independent replies.'
+                      : 'Your prompt goes to the selected agent.'}
               </span>
               <span>↵ send</span>
             </div>

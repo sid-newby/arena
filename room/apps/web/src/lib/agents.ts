@@ -1,4 +1,5 @@
 import type { Narration } from './speech-queue';
+import { parseHumanMessages, type MessageReceipt } from './messaging.ts';
 import { DEBATE_SEATS, type SeatId, type ProviderId } from '../../../api/src/runs/run.contract.ts';
 import type { ScopedCatalog } from './run-scope.ts';
 import { ExpressionClock, parseExpression, type ExpressionSnapshot } from './panel-expression.ts';
@@ -80,6 +81,7 @@ export type Reply = {
   delivery?: PanelistDelivery;
 };
 export type Snapshot = ExpressionSnapshot & {
+  humanMessages: MessageReceipt[];
   runId?: string;
   revision?: number;
   cursor?: number;
@@ -93,6 +95,7 @@ export type Snapshot = ExpressionSnapshot & {
   pendingPanelistMessages: number;
 };
 export const emptySnapshot: Snapshot = {
+  humanMessages: [],
   messages: [],
   pendingPanelistMessages: 0,
   status: 'idle',
@@ -247,6 +250,10 @@ export function parseSnapshot(
     clock.calibrate(serverNow, requestStartedAt, receivedAt);
   return {
     ...value,
+    humanMessages: parseHumanMessages(
+      value.humanMessages,
+      expectedRunId ?? (typeof value.runId === 'string' ? value.runId : undefined),
+    ),
     pendingPanelistMessages: value.pendingPanelistMessages ?? 0,
     poseRevision: typeof value.poseRevision === 'number' ? value.poseRevision : 0,
     expression,

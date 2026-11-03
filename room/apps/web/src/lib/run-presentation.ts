@@ -6,13 +6,13 @@ export function runPresentation(workflow?: Pick<WorkflowSnapshot, 'phase' | 'tas
     return {
       configured: false,
       description:
-        'Start a new debate. Tell Maestro what A and B should work out, then define an acceptable outcome together.',
+        'Start a new debate by entering what A and B should work out. Add an evidence folder if they need local files.',
     };
   if (workflow.phase === 'draft' || workflow.phase === 'ready')
     return {
       configured: true,
       description:
-        'Review the debate question, success criteria, and setup with Maestro before starting A and B.',
+        'You can adjust the question and settings before starting A and B.',
     };
   return {
     configured: true,

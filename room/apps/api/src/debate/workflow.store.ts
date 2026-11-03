@@ -2,6 +2,7 @@ import { parseProviderConfig } from '../runs/provider-config.js';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { isAbsolute } from 'node:path';
 import type {
   ActionProposal,
   RunSnapshot,
@@ -22,6 +23,7 @@ export interface WorkflowRecord {
   pauseRequested: boolean;
   handoffs: number;
   error?: string;
+  evidenceFolderFromPrompt?: true;
   proposedSeats?: Record<SeatId, import('../runs/run.contract.js').ProviderConfig>;
 }
 export function object(value: unknown): value is Record<string, unknown> {
@@ -102,6 +104,17 @@ export function parseTask(value: unknown): TaskDraft {
       value.projectDirectory.length > 4096)
   )
     throw new BadRequestException('Choose a valid project directory.');
+  const evidenceFolder =
+    value.evidenceFolder === undefined ? undefined : string('evidenceFolder', 4096, true);
+  if (evidenceFolder && (!isAbsolute(evidenceFolder) || evidenceFolder.includes('\0')))
+    throw new BadRequestException('Choose an absolute evidence folder path.');
+  if (
+    evidenceFolder &&
+    (source || scaffold || value.projectDirectory || value.profile !== 'analysis')
+  )
+    throw new BadRequestException(
+      'Use an evidence folder with a read-only debate and no other project source or destination.',
+    );
   const task: TaskDraft = {
     question: string('question', 6000, true),
     mode: value.mode,
@@ -109,6 +122,7 @@ export function parseTask(value: unknown): TaskDraft {
     criteria: strings('criteria', 8, 500),
     grounding: strings('grounding', 20, 1000),
     source,
+    ...(evidenceFolder ? { evidenceFolder } : {}),
     ...(typeof value.projectDirectory === 'string'
       ? { projectDirectory: value.projectDirectory.trim() }
       : {}),
@@ -197,7 +211,8 @@ export class WorkflowStore {
       typeof value.pauseRequested !== 'boolean' ||
       typeof value.handoffs !== 'number' ||
       !Number.isSafeInteger(value.handoffs) ||
-      (value.error !== undefined && typeof value.error !== 'string')
+      (value.error !== undefined && typeof value.error !== 'string') ||
+      (value.evidenceFolderFromPrompt !== undefined && value.evidenceFolderFromPrompt !== true)
     )
       throw new Error('Stored workflow state is invalid.');
     const turns = value.turns;
@@ -238,6 +253,7 @@ export class WorkflowStore {
       handoffs: value.handoffs,
       ...(value.error ? { error: value.error } : {}),
       ...(proposedSeats ? { proposedSeats } : {}),
+      ...(value.evidenceFolderFromPrompt === true ? { evidenceFolderFromPrompt: true } : {}),
     };
   }
   write(id: string, record: WorkflowRecord) {
@@ -269,12 +285,17 @@ export class WorkflowStore {
       return record;
     });
   }
-  pendingFeedback(now: number) {
+  pendingFeedback(now: number, excluded: readonly string[] = []) {
+    const exclude = excluded.length
+      ? ' AND id NOT IN (' + excluded.map(() => '?').join(',') + ')'
+      : '';
     return this.db
       .prepare(
-        'SELECT id,run_id,kind,attempts FROM workflow_feedback_queue WHERE delivered=0 AND attempts<8 AND next_at<=? ORDER BY rowid LIMIT 10',
+        'SELECT id,run_id,kind,attempts FROM workflow_feedback_queue WHERE delivered=0 AND attempts<8 AND next_at<=?' +
+          exclude +
+          ' ORDER BY rowid LIMIT 10',
       )
-      .all(now)
+      .all(now, ...excluded)
       .map((row) => ({
         id: String(row.id),
         runId: String(row.run_id),
@@ -282,13 +303,34 @@ export class WorkflowStore {
         attempts: Number(row.attempts),
       }));
   }
+  nextFeedbackAt(excluded: readonly string[] = []): number | undefined {
+    const exclude = excluded.length
+      ? ' AND id NOT IN (' + excluded.map(() => '?').join(',') + ')'
+      : '';
+    const row = this.db
+      .prepare(
+        'SELECT MIN(next_at) AS next_at FROM workflow_feedback_queue WHERE delivered=0 AND attempts<8' +
+          exclude,
+      )
+      .get(...excluded);
+    return row?.next_at === null || row?.next_at === undefined ? undefined : Number(row.next_at);
+  }
   finishFeedback(id: string, success: boolean, attempts: number, now: number) {
-    if (success)
-      this.db.prepare('UPDATE workflow_feedback_queue SET delivered=1 WHERE id=?').run(id);
-    else
-      this.db
-        .prepare('UPDATE workflow_feedback_queue SET attempts=?,next_at=? WHERE id=?')
-        .run(attempts + 1, now + Math.min(300000, 5000 * 2 ** attempts), id);
+    this.transaction(() => {
+      const row = this.db.prepare('SELECT run_id FROM workflow_feedback_queue WHERE id=?').get(id);
+      if (!row) return;
+      if (success)
+        this.db.prepare('UPDATE workflow_feedback_queue SET delivered=1 WHERE id=?').run(id);
+      else
+        this.db
+          .prepare('UPDATE workflow_feedback_queue SET attempts=?,next_at=? WHERE id=?')
+          .run(attempts + 1, now + Math.min(300000, 5000 * 2 ** attempts), id);
+      this.append(String(row.run_id), 'workflow.feedback-delivery', {
+        eventId: id,
+        delivered: success,
+        attempts: success ? attempts : attempts + 1,
+      });
+    });
   }
   failedFeedbackCount(runId: string): number {
     const row = this.db
@@ -304,6 +346,7 @@ export class WorkflowStore {
         'UPDATE workflow_feedback_queue SET attempts=0,next_at=0 WHERE run_id=? AND delivered=0 AND attempts>=8',
       )
       .run(runId);
+    this.append(runId, 'workflow.feedback-retried', {});
   }
   check(id: string, expected: number) {
     if (this.run(id).revision !== expected)

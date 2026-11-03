@@ -112,3 +112,58 @@ export function maestroCancellationTarget(
   );
   return active?.turnId ? { turnId: active.turnId } : undefined;
 }
+import { subscribeRoomEvents } from './room-events.ts';
+
+export function waitForMaestroTurn(
+  runId: string,
+  turnId: string,
+  signal: AbortSignal,
+  timeoutMs = 180000,
+): Promise<MaestroMessage> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let unsubscribe: (() => void) | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      unsubscribe?.();
+      clearTimeout(deadline);
+      signal.removeEventListener('abort', aborted);
+    };
+    const fail = (cause: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(cause);
+    };
+    const aborted = () => fail(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    if (signal.aborted) {
+      aborted();
+      return;
+    }
+    signal.addEventListener('abort', aborted, { once: true });
+    deadline = setTimeout(
+      () => fail(new Error('Maestro is still working. Check the private chat for its response.')),
+      timeoutMs,
+    );
+    unsubscribe = subscribeRoomEvents(runId, 'maestro', {
+      message: ({ data }) => {
+        if (settled) return;
+        try {
+          const snapshot = parseMaestroSnapshot(JSON.parse(data), runId);
+          const terminal = snapshot.messages.find(
+            (entry) =>
+              entry.role === 'assistant' && entry.turnId === turnId && entry.status !== 'streaming',
+          );
+          if (!terminal) return;
+          settled = true;
+          cleanup();
+          resolve(terminal);
+        } catch (cause) {
+          fail(cause);
+        }
+      },
+      error: () => {},
+    });
+    if (settled) unsubscribe?.();
+  });
+}

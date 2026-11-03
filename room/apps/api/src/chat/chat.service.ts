@@ -1,3 +1,10 @@
+import { SideConversationService } from './side-conversation.service.js';
+import {
+  MESSAGE_INTENTS,
+  type MessageReceipt,
+  type WorkflowInvalidation,
+} from './message.contract.js';
+import { UnconfirmedCancellationError } from './runtime-cancellation.js';
 import type { SpeechReference } from '../speech/speech.service.js';
 import {
   BadRequestException,
@@ -37,12 +44,23 @@ import type {
 export class ChatService implements OnModuleDestroy {
   private readonly active = new Map<
     string,
-    { controller: AbortController; promise: Promise<void>; turn: TurnRow }
+    {
+      controller: AbortController;
+      promise: Promise<void>;
+      turn: TurnRow;
+      cancellationUnconfirmed?: boolean;
+    }
   >();
   private readonly humanWaiters = new Map<string, number>();
-  private drainTimer?: ReturnType<typeof setTimeout>;
+  private drainScheduled = false;
+  private initialized = false;
+  private readonly drainRuns = new Set<string>();
+  private readonly messagePumps = new Set<string>();
+  private unsubscribeCommits?: () => void;
+  private sideService?: SideConversationService;
   private destroyed = false;
   private readonly stopEpochs = new Map<string, number>();
+  private readonly seatStopEpochs = new Map<string, number>();
   private readonly listeners = new Map<string, Set<(snapshot: ChatSnapshot) => void>>();
   private readonly expressionRuns = new Map<string, PanelExpressions>();
   private readonly runtimeCache = new Map<string, AgentRuntime>();
@@ -61,6 +79,7 @@ export class ChatService implements OnModuleDestroy {
       process.env.ROOM_DB_PATH ?? resolve(this.workspace, '.room/chat.sqlite'),
       this.workspace,
     );
+    this.observeCommits();
   }
   static forTest(
     store: ChatStore,
@@ -69,6 +88,7 @@ export class ChatService implements OnModuleDestroy {
     options: {
       catalogReader?: (provider: ProviderId) => Promise<ProviderCatalog>;
       runtimeFactory?: (binding: ParticipantBinding) => AgentRuntime;
+      initialize?: boolean;
     } = {},
   ): ChatService {
     const service = Object.assign(Object.create(ChatService.prototype), {
@@ -76,8 +96,13 @@ export class ChatService implements OnModuleDestroy {
       workspace,
       active: new Map(),
       humanWaiters: new Map(),
+      messagePumps: new Set(),
+      drainScheduled: false,
+      initialized: false,
+      drainRuns: new Set(),
       destroyed: false,
       stopEpochs: new Map(),
+      seatStopEpochs: new Map(),
       listeners: new Map(),
       expressionRuns: new Map(),
       runtimeCache: new Map(),
@@ -86,7 +111,60 @@ export class ChatService implements OnModuleDestroy {
         ((binding: ParticipantBinding) => runtimes[binding.role === 'b' ? 'b' : 'a']),
       catalogReader: options.catalogReader ?? discoverModels,
     }) as ChatService;
+    service.observeCommits();
+    if (options.initialize !== false) service.onModuleInit();
     return service;
+  }
+  private observeCommits() {
+    this.unsubscribeCommits = this.store.onCommit((runId) => {
+      if (this.destroyed) return;
+      this.emitBoth(runId);
+      this.scheduleDrain(runId);
+    });
+  }
+  onModuleInit() {
+    this.initialized = true;
+    for (const run of this.store.runs.list()) this.scheduleDrain(run.id);
+  }
+  committed(listener: (runId: string) => void) {
+    return this.store.onCommit(listener);
+  }
+  workflowEvents(runId: string) {
+    this.store.runs.get(runId);
+    return new Observable<{ data: WorkflowInvalidation }>((subscriber) => {
+      const send = () =>
+        subscriber.next({
+          data: {
+            runId,
+            revision: this.run(runId).revision,
+            cursor: this.store.runs.cursor(runId),
+          },
+        });
+      const unsubscribe = this.committed((id) => {
+        if (id === runId) send();
+      });
+      send();
+      return unsubscribe;
+    });
+  }
+  private side() {
+    return (this.sideService ??= new SideConversationService(
+      this.store,
+      (binding) => this.runtimeFactory(binding),
+      this.workspace,
+    ));
+  }
+  sideSnapshot(runId: string, seat: AgentId) {
+    return this.side().snapshot(runId, seat);
+  }
+  sideEvents(runId: string, seat: AgentId) {
+    return this.side().events(runId, seat);
+  }
+  submitSide(runId: string, seat: AgentId, body: unknown) {
+    return this.side().submit(runId, seat, body);
+  }
+  stopSide(runId: string, seat: AgentId) {
+    return this.side().stop(runId, seat);
   }
   agent(value: string): AgentId {
     if (value !== 'a' && value !== 'b') throw new NotFoundException('Unknown agent');
@@ -117,14 +195,29 @@ export class ChatService implements OnModuleDestroy {
   workflowPersistence() {
     return this.store.runs;
   }
-  busy(runId: string) {
+  executing(runId: string) {
     return (
       this.store.forRun(runId).busy() ||
       DEBATE_SEATS.some(
         (seat) =>
-          this.active.has(this.key(seat, runId)) || this.humanWaiters.has(this.key(seat, runId)),
+          this.active.has(this.key(seat, runId)) ||
+          this.humanWaiters.has(this.key(seat, runId)) ||
+          this.messagePumps.has(this.key(seat, runId)),
       )
     );
+  }
+  busy(runId: string) {
+    return this.store.messaging.pending(runId) || this.executing(runId);
+  }
+  reapproveQueued(runId: string) {
+    const run = this.run(runId);
+    for (const seat of DEBATE_SEATS)
+      this.store.messaging.reapprove(
+        runId,
+        seat,
+        this.store.runs.binding(runId, seat).id,
+        run.revision,
+      );
   }
   publishEvent(runId: string, kind: string, payload: Record<string, unknown>) {
     this.store.runs.append(runId, kind, null, null, payload);
@@ -187,7 +280,7 @@ export class ChatService implements OnModuleDestroy {
   selectRun(id: string) {
     if (
       this.active.size ||
-      [...this.store.runs.list()].some((run) => this.store.forRun(run.id).busy())
+      [...this.store.runs.list()].some((run) => this.busy(run.id) || this.sideService?.busy(run.id))
     )
       throw new ConflictException('Stop active and queued work before changing the current run.');
     return this.store.runs.select(id);
@@ -201,15 +294,24 @@ export class ChatService implements OnModuleDestroy {
     return new Observable<{ id: string; data: unknown }>((subscriber) => {
       let cursor = after;
       const send = () => {
-        const rows = this.store.runs.correspondence(id, cursor, 500);
-        for (const row of rows) {
-          subscriber.next({ id: String(row.seq), data: row });
-          cursor = row.seq;
+        const through = this.store.runs.cursor(id);
+        while (cursor < through && !subscriber.closed) {
+          const rows = this.store.runs
+            .correspondence(id, cursor, 500)
+            .filter((row) => row.seq <= through);
+          if (!rows.length) break;
+          for (const row of rows) {
+            if (subscriber.closed) break;
+            cursor = row.seq;
+            subscriber.next({ id: String(row.seq), data: row });
+          }
         }
       };
+      const unsubscribe = this.committed((runId) => {
+        if (runId === id) send();
+      });
       send();
-      const timer = setInterval(send, 250);
-      return () => clearInterval(timer);
+      return unsubscribe;
     });
   }
   providerCatalog(value: string) {
@@ -249,7 +351,8 @@ export class ChatService implements OnModuleDestroy {
       body.expectedRevision,
       seats,
       () =>
-        this.store.forRun(id).busy() ||
+        this.busy(id) ||
+        this.sideService?.busy(id) ||
         DEBATE_SEATS.some(
           (role) =>
             this.active.has(this.key(role, id)) || this.humanWaiters.has(this.key(role, id)),
@@ -369,6 +472,7 @@ export class ChatService implements OnModuleDestroy {
       throw new ServiceUnavailableException(runtime.info.reason);
     if (this.destroyed) throw new ServiceUnavailableException('The room is shutting down.');
     const epoch = this.stopEpochs.get(runId) ?? 0;
+    const seatEpoch = this.seatStopEpochs.get(key) ?? 0;
     this.humanWaiters.set(key, (this.humanWaiters.get(key) ?? 0) + 1);
     try {
       const active = this.active.get(key);
@@ -382,7 +486,11 @@ export class ChatService implements OnModuleDestroy {
         this.emitBoth(runId);
         await active.promise;
       }
-      if (this.destroyed || epoch !== (this.stopEpochs.get(runId) ?? 0))
+      if (
+        this.destroyed ||
+        epoch !== (this.stopEpochs.get(runId) ?? 0) ||
+        seatEpoch !== (this.seatStopEpochs.get(key) ?? 0)
+      )
         throw new ConflictException(
           'The conversation stopped. Send your message again to continue.',
         );
@@ -400,22 +508,35 @@ export class ChatService implements OnModuleDestroy {
       const waiting = (this.humanWaiters.get(key) ?? 1) - 1;
       if (waiting) this.humanWaiters.set(key, waiting);
       else this.humanWaiters.delete(key);
-      this.scheduleDrain();
+      this.scheduleDrain(runId);
     }
   }
   private emitBoth(runId = this.store.runs.currentId()) {
     for (const agent of PANELISTS) this.emit(agent, runId);
   }
-  private scheduleDrain() {
-    if (this.destroyed || this.drainTimer) return;
-    this.drainTimer = setTimeout(() => {
-      this.drainTimer = undefined;
-      for (const run of this.store.runs.list()) {
+  private scheduleDrain(requestedRunId = this.store.runs.currentId()) {
+    if (this.destroyed || !this.initialized) return;
+    this.drainRuns.add(requestedRunId);
+    if (this.drainScheduled) return;
+    this.drainScheduled = true;
+    queueMicrotask(() => {
+      this.drainScheduled = false;
+      if (this.destroyed) return;
+      const runs = [...this.drainRuns];
+      this.drainRuns.clear();
+      for (const runId of runs) {
+        const run = this.run(runId);
+        for (const agent of PANELISTS) void this.drainMessages(run.id, agent);
         const store = this.store.forRun(run.id);
         if (this.executionPolicy && !this.executionPolicy.drain(run.id)) continue;
         for (const agent of PANELISTS) {
           const key = this.key(agent, run.id);
-          if (this.active.has(key) || this.humanWaiters.has(key)) continue;
+          if (
+            this.active.has(key) ||
+            this.humanWaiters.has(key) ||
+            this.store.messaging.pending(run.id, agent)
+          )
+            continue;
           const delivery = store.nextDelivery(agent);
           if (!delivery) continue;
           const runtime = this.runtime(this.store.runs.binding(run.id, agent));
@@ -425,15 +546,170 @@ export class ChatService implements OnModuleDestroy {
               runtime.info.reason ?? 'Recipient provider unavailable.',
             );
             this.emitBoth(run.id);
-            this.scheduleDrain();
+            this.scheduleDrain(run.id);
             continue;
           }
           const turn = store.claimDelivery(delivery);
           if (turn) this.startTurn(turn);
         }
       }
-    }, 200);
-    this.drainTimer.unref();
+    });
+  }
+  submitMessage(agent: AgentId, body: unknown, runId: string): MessageReceipt {
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      !('text' in body) ||
+      typeof body.text !== 'string' ||
+      !body.text.trim() ||
+      body.text.length > 16000 ||
+      !('requestId' in body) ||
+      typeof body.requestId !== 'string' ||
+      !/^[a-zA-Z0-9_-]{8,128}$/.test(body.requestId) ||
+      !('expectedRevision' in body) ||
+      typeof body.expectedRevision !== 'number' ||
+      !Number.isSafeInteger(body.expectedRevision) ||
+      !('intent' in body) ||
+      !MESSAGE_INTENTS.some((value) => value === body.intent)
+    )
+      throw new BadRequestException(
+        'Provide text, requestId, expectedRevision and a valid delivery intent.',
+      );
+    const intent = body.intent;
+    if (intent !== 'send' && intent !== 'queue' && intent !== 'interrupt')
+      throw new BadRequestException('Invalid delivery intent.');
+    const run = this.run(runId),
+      binding = this.store.runs.binding(runId, agent);
+    const existing = this.store.messaging.find(runId, agent, body.requestId);
+    if (existing) {
+      if (
+        existing.text !== body.text.trim() ||
+        existing.intent !== intent ||
+        existing.bindingId !== binding.id ||
+        existing.revision !== body.expectedRevision
+      )
+        throw new ConflictException(
+          'This requestId was already used for different content, intent, or scope.',
+        );
+      return existing;
+    }
+    if (this.destroyed) throw new ServiceUnavailableException('The room is shutting down.');
+    if (run.state === 'retained' || run.revision !== body.expectedRevision)
+      throw new ConflictException('The run configuration changed or is read-only.');
+    this.executionPolicy?.intervention?.(runId, agent, intent);
+    if (
+      intent === 'send' &&
+      (this.active.has(this.key(agent, runId)) || this.store.messaging.pending(runId, agent))
+    )
+      throw new ConflictException('This seat is working. Choose Queue or Interrupt and send.');
+    if (
+      this.store.messaging
+        .list(runId, agent)
+        .filter((message) =>
+          ['queued', 'dispatching', 'running', 'uncertain'].includes(message.status),
+        ).length >= 64
+    )
+      throw new ConflictException(
+        'This seat has 64 pending messages. Cancel or finish some before adding more.',
+      );
+    const runtime = this.runtime(binding);
+    if (runtime.info.status === 'unavailable')
+      throw new ServiceUnavailableException(runtime.info.reason);
+    const result = this.store.messaging.create({
+      runId,
+      seat: agent,
+      bindingId: binding.id,
+      revision: run.revision,
+      requestId: body.requestId,
+      text: body.text.trim(),
+      intent,
+    });
+    this.emit(agent, runId);
+    this.scheduleDrain(runId);
+    return result;
+  }
+  cancelMessage(agent: AgentId, runId: string, id: string) {
+    const result = this.store.messaging.cancel(id, runId, agent);
+    this.emit(agent, runId);
+    this.scheduleDrain(runId);
+    return result;
+  }
+  private async drainMessages(runId: string, agent: AgentId) {
+    const key = this.key(agent, runId);
+    if (
+      this.destroyed ||
+      this.messagePumps.has(key) ||
+      this.executionPolicy?.messageDrain?.(runId) === false
+    )
+      return;
+    const messages = this.store.messaging.list(runId, agent);
+    if (messages.some((message) => message.status === 'uncertain')) return;
+    const message =
+      messages.find((value) => value.status === 'queued' && value.intent === 'interrupt') ??
+      this.store.messaging.next(runId, agent);
+    if (!message) return;
+    const active = this.active.get(key);
+    if (active && message.intent !== 'interrupt') return;
+    this.messagePumps.add(key);
+    const epoch = this.stopEpochs.get(runId) ?? 0;
+    const seatEpoch = this.seatStopEpochs.get(key) ?? 0;
+    try {
+      const binding = this.store.runs.binding(runId, agent);
+      if (
+        binding.id !== message.bindingId ||
+        this.run(runId).revision !== this.store.messaging.dispatchRevision(message.id)
+      )
+        throw new ConflictException('The saved message belongs to an earlier configuration.');
+      this.executionPolicy?.intervention?.(runId, agent, message.intent);
+      this.store.messaging.update(message, 'dispatching');
+      if (active) {
+        this.store
+          .forRun(runId)
+          .cancelConversation(active.turn.conversation_id, 'Sid interrupted this reply.');
+        active.controller.abort();
+        await active.promise;
+        if (active.cancellationUnconfirmed) {
+          this.store.messaging.update(message, 'uncertain', {
+            error: 'Cancellation was not acknowledged. Review this delivery before continuing.',
+          });
+          return;
+        }
+      }
+      const current = this.store.messaging.get(message.id, runId, agent);
+      if (
+        this.destroyed ||
+        epoch !== (this.stopEpochs.get(runId) ?? 0) ||
+        seatEpoch !== (this.seatStopEpochs.get(key) ?? 0) ||
+        current.status === 'cancelled'
+      ) {
+        if (current.status !== 'cancelled') this.store.messaging.update(message, 'cancelled');
+        return;
+      }
+      if (this.active.has(key))
+        throw new ConflictException('Another reply started before delivery.');
+      const id = randomUUID();
+      this.store
+        .forRun(runId)
+        .create(
+          id,
+          agent,
+          message.requestId,
+          message.text,
+          this.store.messaging.dispatchRevision(message.id),
+          'intervention',
+          message.createdAt,
+        );
+      this.store.messaging.update(message, 'running', { turnId: id });
+      this.startTurn(this.store.forRun(runId).turn(id));
+    } catch (error) {
+      if (this.store.messaging.get(message.id, runId, agent).status !== 'cancelled')
+        this.store.messaging.update(message, 'failed', {
+          error: error instanceof Error ? error.message : 'Message delivery failed.',
+        });
+    } finally {
+      this.messagePumps.delete(key);
+      this.emit(agent, runId);
+    }
   }
   private startTurn(turn: TurnRow) {
     const { id, agent, prompt: text } = turn;
@@ -443,7 +719,12 @@ export class ChatService implements OnModuleDestroy {
     const key = this.key(agent, turn.run_id);
     const controller = new AbortController();
     const policy = this.executionPolicy;
-    policy?.started(turn.run_id, agent, id);
+    policy?.started(
+      turn.run_id,
+      agent,
+      id,
+      Boolean(this.store.messaging.find(turn.run_id, agent, turn.request)),
+    );
     const additions = policy?.definitions(binding);
     const definitions = additions
       ? [
@@ -582,8 +863,16 @@ export class ChatService implements OnModuleDestroy {
           performance.now() - started,
         );
       } catch (error) {
-        if (controller.signal.aborted) store.finish(id, 'stopped', performance.now() - started);
-        else {
+        if (controller.signal.aborted) {
+          store.finish(id, 'stopped', performance.now() - started);
+          if (error instanceof UnconfirmedCancellationError) {
+            const active = this.active.get(key);
+            if (active) active.cancellationUnconfirmed = true;
+            const receipt = this.store.messaging.find(turn.run_id, agent, turn.request);
+            if (receipt)
+              this.store.messaging.update(receipt, 'uncertain', { error: error.message });
+          }
+        } else {
           const message = error instanceof Error ? error.message : 'The agent connection failed.';
           store.finish(id, 'failed', performance.now() - started);
           store.setError(agent, message);
@@ -595,13 +884,16 @@ export class ChatService implements OnModuleDestroy {
       } finally {
         this.active.delete(key);
         this.emitBoth(turn.run_id);
-        this.scheduleDrain();
+        this.scheduleDrain(turn.run_id);
       }
     });
     this.active.set(key, { controller, promise, turn });
     this.emitBoth(turn.run_id);
   }
   async stop(agent: AgentId, runId = this.store.runs.currentId()) {
+    const key = this.key(agent, runId);
+    this.seatStopEpochs.set(key, (this.seatStopEpochs.get(key) ?? 0) + 1);
+    this.store.messaging.cancelPending(runId, agent);
     const active = this.active.get(this.key(agent, runId));
     if (active) {
       this.store
@@ -621,18 +913,26 @@ export class ChatService implements OnModuleDestroy {
   async stopConversation(runId = this.store.runs.currentId()) {
     if (!this.destroyed) this.executionPolicy?.stopped(runId);
     this.stopEpochs.set(runId, (this.stopEpochs.get(runId) ?? 0) + 1);
+    this.store.messaging.cancelPending(runId);
+    const sideStopped = this.sideService?.stopRun(runId);
     this.store.forRun(runId).cancelAllConversations('Conversation stopped by Sid.');
     const active = [...this.active.values()].filter((turn) => turn.turn.run_id === runId);
     active.forEach((turn) => turn.controller.abort());
-    await Promise.allSettled(active.map((turn) => turn.promise));
+    await Promise.allSettled([
+      ...active.map((turn) => turn.promise),
+      ...(sideStopped ? [sideStopped] : []),
+    ]);
     this.emitBoth(runId);
     return { stopped: true };
   }
   async onModuleDestroy() {
     if (this.destroyed) return;
     this.destroyed = true;
-    if (this.drainTimer) clearTimeout(this.drainTimer);
-    for (const run of this.store.runs.list()) await this.stopConversation(run.id);
+    this.unsubscribeCommits?.();
+    await this.sideService?.close();
+    const active = [...this.active.values()];
+    active.forEach((turn) => turn.controller.abort());
+    await Promise.allSettled(active.map((turn) => turn.promise));
     for (const expressions of this.expressionRuns.values()) expressions.close();
     this.store.close();
   }

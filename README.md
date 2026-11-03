@@ -161,10 +161,18 @@ Open **Maestro** for private chat or the **Run** tab. Maestro starts with Codex
 `gpt-6.1-sol` at high effort. It is text-only and observes A/B correspondence.
 Private questions do not interrupt the debate or publish instructions.
 
-Review the task, success criteria, models, shared grounding, source commit, and
-time and handoff limits. **Prepare workspaces** creates separate A/B worktrees
-or scratch spaces and checks their contained tools. **Start independent work**
-then starts both candidates. Comparison and discussion require explicit controls
+In the **Run** tab, enter a question and choose **Start debate**. To discuss
+local files, pick an optional **Evidence folder** first. Both seats can read the
+same snapshot of its current files, including uncommitted Markdown and code.
+For example, select your project folder and ask “Does D01 in
+`dead-opus/issues-final.md` match the implementation?” A plain folder works.
+If you paste an absolute project or file path under `room/evidence/` in the
+question, Arena can attach that locker project when the Evidence folder field
+is blank. Both seats see paths relative to the project root.
+Use a small project folder (up to 20 MiB of included files, 5 MiB per file).
+The copy skips hidden files, links, dependencies, build output, and common
+credential files. Use the relative paths inside the folder in your question.
+Comparison and discussion require explicit controls
 after independent outputs finish. A pause waits for the current output boundary;
 Stop aborts A/B work. Failed or interrupted candidates require deliberate retry.
 
@@ -177,6 +185,11 @@ can use web search and Context7 for research. Candidate artifacts retain their s
 hash. HTML previews run in an opaque sandbox. Maestro can propose moderation
 actions for explicit user application and retain an attributed prose synthesis.
 Synthesis does not automatically merge code. Workspaces remain retained.
+
+The main composer supports queued follow-ups and interrupt-and-send while a seat
+works. Each seat also has a separate read-only side conversation. See
+[seat messaging](room/docs/seat-messaging.md) for delivery, cancellation, recovery,
+and side-conversation behavior.
 
 A/B voices follow the seats through `MODEL_A_VOICE_ID` and `MODEL_B_VOICE_ID`.
 Either seat can use an available subscribed Codex or Anthropic model. The staged
@@ -210,11 +223,10 @@ workspace policy; review any install script before adding it to `allowBuilds`.
 
 ## Maestro setup and closeout
 
-Open Maestro to configure a debate through the question, success criteria, project,
-models, and review steps. Choose a local Git repository, browse to one outside
-arena, select an available scaffold, or use scratch space. Maestro can suggest
-criteria for explicit acceptance. Preflight checks the selected models, source,
-and destination before preparation.
+Advanced setup lets you choose models, criteria, a specific Git commit, a
+scaffold, or build tools. Maestro can suggest criteria for review. For a debate
+using current files, choose the folder that contains the evidence. It can live
+anywhere on disk, including under the local `room/evidence/` directory.
 
 The application creates separate A and B workspaces under `workspaces/` by
 default. Set `ROOM_MANAGED_WORKSPACE_ROOT` to use another destination. Private

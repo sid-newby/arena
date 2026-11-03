@@ -25,10 +25,20 @@ import type { MaestroRunToolProvider } from '../maestro/maestro.service.js';
 import { CommandSandbox } from '../tools/command-sandbox.js';
 import { ToolBroker } from '../tools/tool-broker.js';
 import { parseProviderConfig } from '../runs/provider-config.js';
-import { WorkspaceLocationError, WorkspaceManager } from '../workspaces/workspace-manager.js';
+import {
+  WorkspaceLocationError,
+  WorkspaceManager,
+  type WorkspaceSource,
+} from '../workspaces/workspace-manager.js';
 import { workspacePaths } from '../workspaces/workspace-paths.js';
 import { WorkspaceLifecycle } from '../workspaces/workspace-lifecycle.js';
 import { prepareScaffoldSeed } from '../scaffolds/scaffold-seed.js';
+import { prepareEvidenceSeed } from '../workspaces/evidence-folder.js';
+import {
+  evidencePathExamples,
+  resolveLockerEvidence,
+  verifyEvidenceReferences,
+} from '../workspaces/locker-evidence.js';
 import { RetainedWorkspaces } from '../workspaces/retained-workspaces.js';
 import {
   DEBATE_SEATS,
@@ -90,7 +100,9 @@ export class DebateService implements OnModuleDestroy {
   private readonly sandbox = new CommandSandbox();
   private readonly chat: ChatService;
   private readonly root: string;
-  private readonly timer: ReturnType<typeof setInterval>;
+  private unsubscribeCommits?: () => void;
+  private readonly deadlines = new Map<string, ReturnType<typeof setTimeout>>();
+  private feedbackRetry?: ReturnType<typeof setTimeout>;
   private closed = false;
   private feedbackSender?: (
     runId: string,
@@ -170,10 +182,6 @@ export class DebateService implements OnModuleDestroy {
       }
     };
     this.attach();
-    this.timer = setInterval(() => {
-      if (!this.closed) this.poll();
-    }, 200);
-    this.timer.unref();
   }
   static forTest(
     chat: ChatService,
@@ -189,6 +197,7 @@ export class DebateService implements OnModuleDestroy {
       verify,
       closed: false,
       feedbackInFlight: new Set<string>(),
+      deadlines: new Map(),
     }) as DebateService;
     service.attach();
     return service;
@@ -246,12 +255,39 @@ export class DebateService implements OnModuleDestroy {
               : 'Use the task controls while this structured step is active. Maestro chat remains available.',
           );
       },
-      started: (runId, seat, turnId) => {
+      intervention: (runId, _seat, _intent) => {
         const record = this.workflows.read(runId);
-        if (record.phase === 'discussion')
+        if (
+          record.task &&
+          ['completed', 'stopped', 'preparing', 'draft', 'ready', 'failed', 'interrupted'].includes(
+            record.phase,
+          )
+        )
+          throw new ConflictException(
+            'This task is not open for main-seat interventions. Use a side conversation or start/resume the task.',
+          );
+      },
+      messageDrain: (runId) => {
+        const record = this.workflows.read(runId);
+        return (
+          !record.task ||
+          (!record.pauseRequested &&
+            ['independent', 'comparison', 'discussion', 'awaiting-comparison'].includes(
+              record.phase,
+            ))
+        );
+      },
+      started: (runId, seat, turnId, intervention) => {
+        const record = this.workflows.read(runId);
+        if (record.phase === 'discussion' || (intervention && record.task))
           this.workflows.update(
             runId,
-            { turns: { ...record.turns, [seat]: turnId } },
+            {
+              turns: { ...record.turns, [seat]: turnId },
+              ...(intervention && record.phase === 'awaiting-comparison'
+                ? { phase: 'independent' as const }
+                : {}),
+            },
             'workflow.dispatched',
           );
       },
@@ -279,6 +315,29 @@ export class DebateService implements OnModuleDestroy {
       },
     };
     this.chat.setExecutionPolicy(policy);
+    this.unsubscribeCommits = this.chat.committed((runId) => {
+      if (this.closed) return;
+      this.reconcile(runId);
+      this.armDeadline(runId);
+      this.deliverFeedback();
+    });
+    for (const run of this.chat.listRuns().runs) this.armDeadline(run.id);
+  }
+  private armDeadline(runId: string) {
+    const record = this.workflows.read(runId);
+    const current = this.deadlines.get(runId);
+    if (current) clearTimeout(current);
+    this.deadlines.delete(runId);
+    if (!record.deadline || ['completed', 'stopped'].includes(record.phase)) return;
+    const timer = setTimeout(
+      () => {
+        this.deadlines.delete(runId);
+        if (!this.closed) this.reconcile(runId);
+      },
+      Math.max(0, record.deadline - Date.now()),
+    );
+    timer.unref();
+    this.deadlines.set(runId, timer);
   }
   private unfinishedSeats(runId: string, record: WorkflowRecord): SeatId[] {
     if (!record.stage) return [];
@@ -309,6 +368,7 @@ export class DebateService implements OnModuleDestroy {
       revision: run.revision,
       phase: record.phase,
       task: record.task,
+      ...(record.evidenceFolderFromPrompt ? { evidenceFolderFromPrompt: true } : {}),
       seats: run.seats,
       workspaces: workspaces
         ? {
@@ -319,10 +379,12 @@ export class DebateService implements OnModuleDestroy {
         : null,
       artifacts: this.artifacts(runId),
       retrySeats:
-        ['paused', 'interrupted'].includes(record.phase) && !this.chat.busy(runId)
+        ['paused', 'interrupted'].includes(record.phase) && !this.chat.executing(runId)
           ? this.unfinishedSeats(runId, record)
           : [],
-      busy: this.chat.busy(runId),
+      busy: ['paused', 'interrupted'].includes(record.phase)
+        ? this.chat.executing(runId)
+        : this.chat.busy(runId),
       ...(workspaceError ? { workspaceError } : {}),
       ...(record.proposedSeats ? { proposedSeats: record.proposedSeats } : {}),
       ...(record.error ? { error: record.error } : {}),
@@ -341,13 +403,26 @@ export class DebateService implements OnModuleDestroy {
       record.task &&
       (JSON.stringify(record.task.source) !== JSON.stringify(task.source) ||
         JSON.stringify(record.task.scaffold) !== JSON.stringify(task.scaffold) ||
-        record.task.projectDirectory !== task.projectDirectory)
+        record.task.projectDirectory !== task.projectDirectory ||
+        record.task.evidenceFolder !== task.evidenceFolder)
     )
       throw new ConflictException(
-        'Prepared source commits are immutable. Create a new run for another source.',
+        'This run already has its evidence. Create a new run to choose a different source.',
       );
     this.persistence.revise(runId, expectedRevision, () => {
-      this.workflows.update(runId, { task, phase: 'draft', error: undefined }, 'task.updated');
+      this.workflows.update(
+        runId,
+        {
+          task,
+          phase: 'draft',
+          error: undefined,
+          evidenceFolderFromPrompt:
+            record.evidenceFolderFromPrompt && task.evidenceFolder === record.task?.evidenceFolder
+              ? true
+              : undefined,
+        },
+        'task.updated',
+      );
       this.persistence.state.recordTask(runId, task, 'draft-save');
     });
     this.chat.refreshRun(runId);
@@ -364,7 +439,7 @@ export class DebateService implements OnModuleDestroy {
       record.phase === 'preparing'
     )
       throw new ConflictException('Save an idle task draft before preparing it.');
-    const task = record.task;
+    let task = record.task;
     const preparing = this.persistence.revise(runId, expectedRevision, () =>
       this.workflows.update(runId, { phase: 'preparing', error: undefined }, 'workflow.preparing'),
     );
@@ -382,6 +457,14 @@ export class DebateService implements OnModuleDestroy {
       return this.snapshot(runId);
     };
     try {
+      task = parseTask(
+        resolveLockerEvidence(
+          workspacePaths().roomRoot,
+          task,
+          Boolean(task.evidenceFolder && this.manager.get(runId)?.source),
+        ),
+      );
+      const inferredEvidence = !record.task.evidenceFolder && Boolean(task.evidenceFolder);
       const run = this.chat.run(runId);
       for (const seat of DEBATE_SEATS) {
         const selected = run.seats[seat],
@@ -411,18 +494,39 @@ export class DebateService implements OnModuleDestroy {
           })
         : undefined;
       if (!ownsPreparation()) return superseded();
-      const seed = task.scaffold ? await prepareScaffoldSeed(this.root, task.scaffold) : undefined;
-      let source = seed
-        ? { repository: seed.repository, revision: seed.revision }
-        : (task.source ??
-          (projectDirectory ? { repository: projectDirectory, revision: 'HEAD' } : null));
+      const scaffoldSeed = task.scaffold
+        ? await prepareScaffoldSeed(this.root, task.scaffold)
+        : undefined;
+      let seed: WorkspaceSource | undefined = scaffoldSeed;
+      if (task.evidenceFolder) {
+        seed =
+          this.manager.get(runId)?.source ??
+          (await prepareEvidenceSeed(this.root, this.manager.managedRoot, task.evidenceFolder));
+      }
+      if (!ownsPreparation()) return superseded();
+      if (task.evidenceFolder && seed) {
+        await verifyEvidenceReferences(task.evidenceFolder, task.question, seed);
+        if (!ownsPreparation()) return superseded();
+        if (inferredEvidence) {
+          this.workflows.update(
+            runId,
+            { task, evidenceFolderFromPrompt: true },
+            'workflow.evidence-resolved',
+          );
+          this.persistence.state.recordTask(runId, task, 'resolved-source');
+        }
+      }
+      let source =
+        seed ??
+        task.source ??
+        (projectDirectory ? { repository: projectDirectory, revision: 'HEAD' } : null);
       const resolvedTask =
-        seed && task.scaffold
-          ? { ...task, scaffold: { id: task.scaffold.id, digest: seed.digest } }
+        scaffoldSeed && task.scaffold
+          ? { ...task, scaffold: { id: task.scaffold.id, digest: scaffoldSeed.digest } }
           : task;
-      if (source) {
+      if (source && !seed) {
         let emptyProject = false;
-        if (!seed && source.revision === 'HEAD') {
+        if (source.revision === 'HEAD') {
           try {
             emptyProject = await canInitializeProject(source.repository);
           } catch {}
@@ -460,20 +564,16 @@ export class DebateService implements OnModuleDestroy {
         const revision = result.stdout.trim();
         if (!/^[a-f0-9]{40,64}$/.test(revision))
           throw new Error('Git did not resolve an immutable source commit.');
-        if (!seed) {
-          const root = await executeFile(
-            'git',
-            ['-C', source.repository, 'rev-parse', '--show-toplevel'],
-            { encoding: 'utf8', timeout: 10000, maxBuffer: 4096 },
-          );
-          if (realpathSync(root.stdout.trim()) !== realpathSync(source.repository))
-            throw new Error('Choose the repository root, not a folder inside it.');
-          if (!projectDirectory) {
-            const previous = this.manager.get(runId);
-            projectDirectory = previous
-              ? previous.projectDirectory
-              : realpathSync(source.repository);
-          }
+        const root = await executeFile(
+          'git',
+          ['-C', source.repository, 'rev-parse', '--show-toplevel'],
+          { encoding: 'utf8', timeout: 10000, maxBuffer: 4096 },
+        );
+        if (realpathSync(root.stdout.trim()) !== realpathSync(source.repository))
+          throw new Error('Choose the repository root, not a folder inside it.');
+        if (!projectDirectory) {
+          const previous = this.manager.get(runId);
+          projectDirectory = previous ? previous.projectDirectory : realpathSync(source.repository);
         }
         source = { repository: source.repository, revision };
       }
@@ -503,6 +603,8 @@ export class DebateService implements OnModuleDestroy {
             runId,
             {
               phase: 'ready',
+              evidenceFolderFromPrompt:
+                inferredEvidence || record.evidenceFolderFromPrompt || undefined,
               task: {
                 ...resolvedTask,
                 ...(projectDirectory ? { projectDirectory } : {}),
@@ -512,7 +614,11 @@ export class DebateService implements OnModuleDestroy {
             },
             'workflow.ready',
           );
-          if (seed || JSON.stringify(task.source) !== JSON.stringify(prepared.source))
+          if (
+            scaffoldSeed ||
+            (!task.evidenceFolder &&
+              JSON.stringify(task.source) !== JSON.stringify(prepared.source))
+          )
             this.persistence.state.recordTask(
               runId,
               { ...resolvedTask, source: seed ? null : prepared.source },
@@ -621,7 +727,10 @@ export class DebateService implements OnModuleDestroy {
   private prompt(runId: string, seat: SeatId, stage: WorkflowStage) {
     const task = this.workflows.read(runId).task;
     if (!task) throw new Error('Task is missing.');
-    const brief = `Sid started a reviewed ${task.mode} task. You occupy seat ${seat.toUpperCase()}.\nQuestion: ${task.question}\nExpected artifact: ${task.expectedArtifact}\nSuccess criteria: ${JSON.stringify(task.criteria)}\nShared grounding: ${JSON.stringify(task.grounding)}\nTool profile: ${task.profile}. Use web search and Context7 for research when useful. Use only your own workspace and provided tools. Publish completed text directly with publish_text_artifact, supplying its relative filename and text. This works in analysis mode without writing a workspace file. Publish existing workspace files with publish_artifact.\n`;
+    const evidenceInstructions = task.evidenceFolder
+      ? `Your workspace contains a snapshot of ${JSON.stringify(task.evidenceFolder)}. Treat that folder as the workspace root. For a path under that folder, give read_file its relative path. If a requested file is missing, tell Sid before relying on a substitute.\n${evidencePathExamples(task.evidenceFolder, task.question)}`
+      : '';
+    const brief = `${evidenceInstructions}Sid started a reviewed ${task.mode} task. You occupy seat ${seat.toUpperCase()}.\nQuestion: ${task.question}\nExpected artifact: ${task.expectedArtifact}\nSuccess criteria: ${JSON.stringify(task.criteria)}\nShared grounding: ${JSON.stringify(task.grounding)}\nTool profile: ${task.profile}. Use web search and Context7 for research when useful. Use only your own workspace and provided tools. Publish completed text directly with publish_text_artifact, supplying its relative filename and text. This works in analysis mode without writing a workspace file. Publish existing workspace files with publish_artifact.\n`;
     if (stage === 'independent')
       return (
         brief +
@@ -710,7 +819,7 @@ export class DebateService implements OnModuleDestroy {
       !['paused', 'interrupted'].includes(record.phase) ||
       !record.task ||
       !record.stage ||
-      this.chat.busy(runId)
+      this.chat.executing(runId)
     )
       throw new ConflictException('Review an idle paused or interrupted step before resuming.');
     if (record.deadline && Date.now() >= record.deadline)
@@ -739,6 +848,7 @@ export class DebateService implements OnModuleDestroy {
         'workflow.resumed',
       );
     });
+    this.chat.reapproveQueued(runId);
     if (retrySeats.length) await this.dispatch(runId, record.stage, command.requestId, retrySeats);
     this.reconcile(runId);
     return this.snapshot(runId);
@@ -775,7 +885,7 @@ export class DebateService implements OnModuleDestroy {
       return;
     }
     if (!['independent', 'comparison', 'discussion'].includes(record.phase)) return;
-    if (this.chat.busy(runId)) return;
+    if (record.pauseRequested ? this.chat.executing(runId) : this.chat.busy(runId)) return;
     if (record.pauseRequested) {
       this.workflows.update(runId, { phase: 'paused', pauseRequested: false }, 'workflow.paused');
       return;
@@ -841,7 +951,7 @@ export class DebateService implements OnModuleDestroy {
   private deliverFeedback() {
     const sender = this.feedbackSender;
     if (!sender || this.closed) return;
-    for (const event of this.workflows.pendingFeedback(Date.now())) {
+    for (const event of this.workflows.pendingFeedback(Date.now(), [...this.feedbackInFlight])) {
       if (this.feedbackInFlight.has(event.id)) continue;
       this.feedbackInFlight.add(event.id);
       void Promise.resolve()
@@ -856,8 +966,27 @@ export class DebateService implements OnModuleDestroy {
               this.workflows.finishFeedback(event.id, false, event.attempts, Date.now());
           },
         )
-        .finally(() => this.feedbackInFlight.delete(event.id));
+        .finally(() => {
+          this.feedbackInFlight.delete(event.id);
+          this.deliverFeedback();
+        });
     }
+    this.armFeedbackRetry();
+  }
+  private armFeedbackRetry() {
+    if (this.feedbackRetry) clearTimeout(this.feedbackRetry);
+    this.feedbackRetry = undefined;
+    if (this.closed || !this.feedbackSender) return;
+    const next = this.workflows.nextFeedbackAt([...this.feedbackInFlight]);
+    if (next === undefined) return;
+    this.feedbackRetry = setTimeout(
+      () => {
+        this.feedbackRetry = undefined;
+        this.deliverFeedback();
+      },
+      Math.max(0, next - Date.now()),
+    );
+    this.feedbackRetry.unref();
   }
   artifacts(runId: string): ArtifactMetadata[] {
     this.chat.run(runId);
@@ -1141,6 +1270,11 @@ export class DebateService implements OnModuleDestroy {
                   },
                 ],
               },
+              evidenceFolder: {
+                type: 'string',
+                description:
+                  'Optional existing folder Sid named for a read-only debate. Use source null to include its current files.',
+              },
               profile: { type: 'string', enum: ['analysis', 'build'] },
               maxHandoffs: { type: 'integer', minimum: 0, maximum: 8 },
               timeLimitSeconds: { type: 'integer', minimum: 30, maximum: 3600 },
@@ -1205,6 +1339,9 @@ export class DebateService implements OnModuleDestroy {
   }
   onModuleDestroy() {
     this.closed = true;
-    if (this.timer) clearInterval(this.timer);
+    this.unsubscribeCommits?.();
+    this.deadlines.forEach(clearTimeout);
+    this.deadlines.clear();
+    if (this.feedbackRetry) clearTimeout(this.feedbackRetry);
   }
 }

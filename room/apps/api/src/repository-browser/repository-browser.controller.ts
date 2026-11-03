@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs
 import { lstatSync, mkdirSync, opendirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, parse, resolve, sep } from 'node:path';
+import { workspacePaths } from '../workspaces/workspace-paths.js';
 
 const MAX_ENTRIES = 500;
 
@@ -116,7 +117,12 @@ export function browseRepositories(input: unknown): RepositoryBrowserPage {
 @Controller('runs/repositories')
 export class RepositoryBrowserController {
   @Get('browse')
-  browse(@Query('path') path: unknown): RepositoryBrowserPage {
+  browse(@Query('path') path: unknown, @Query('purpose') purpose?: string): RepositoryBrowserPage {
+    if (purpose === 'evidence' && !path) {
+      const locker = join(workspacePaths().roomRoot, 'evidence');
+      if (lstatSync(locker, { throwIfNoEntry: false })?.isDirectory())
+        return browseRepositories(locker);
+    }
     return browseRepositories(path);
   }
 

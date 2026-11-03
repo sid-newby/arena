@@ -114,6 +114,16 @@ export function parseTask(value: unknown): TaskDraft {
   )
     throw new Error('The project directory could not be read.');
   const source = parseSource(value.source);
+  if (
+    value.evidenceFolder !== undefined &&
+    (typeof value.evidenceFolder !== 'string' ||
+      !value.evidenceFolder.trim() ||
+      value.profile !== 'analysis' ||
+      source ||
+      value.scaffold ||
+      value.projectDirectory)
+  )
+    throw new Error('The evidence folder selection is invalid.');
   let scaffold: TaskDraft['scaffold'];
   if (value.scaffold !== undefined) {
     if (
@@ -138,6 +148,7 @@ export function parseTask(value: unknown): TaskDraft {
     criteria: [...value.criteria],
     grounding: [...value.grounding],
     source,
+    ...(typeof value.evidenceFolder === 'string' ? { evidenceFolder: value.evidenceFolder } : {}),
     ...(typeof value.projectDirectory === 'string'
       ? { projectDirectory: value.projectDirectory }
       : {}),
@@ -241,6 +252,11 @@ export function parseWorkflow(value: unknown, runId: string): WorkflowSnapshot {
   )
     throw new Error('The run returned an unreadable update. Reload its saved state.');
   const task = value.task === null ? null : parseTask(value.task);
+  if (
+    value.evidenceFolderFromPrompt !== undefined &&
+    (value.evidenceFolderFromPrompt !== true || !task?.evidenceFolder)
+  )
+    throw new Error('The saved evidence folder could not be verified.');
   if (task === null && !['draft', 'stopped'].includes(value.phase))
     throw new Error('The run has no reviewed task for its current phase.');
   let workspaces: WorkflowSnapshot['workspaces'] = null;
@@ -276,6 +292,7 @@ export function parseWorkflow(value: unknown, runId: string): WorkflowSnapshot {
     task,
     seats: { a: parseProvider(value.seats.a), b: parseProvider(value.seats.b) },
     workspaces,
+    ...(value.evidenceFolderFromPrompt === true ? { evidenceFolderFromPrompt: true as const } : {}),
     artifacts: value.artifacts.map((entry) => parseArtifact(entry, runId)),
     busy: value.busy,
     retrySeats: parseRetrySeats(value.retrySeats),
@@ -320,6 +337,7 @@ export function cleanTask(task: TaskDraft): TaskDraft {
     expectedArtifact: task.expectedArtifact.trim(),
     criteria: task.criteria.map((line) => line.trim()).filter(Boolean),
     grounding: task.grounding.map((line) => line.trim()).filter(Boolean),
+    evidenceFolder: task.evidenceFolder?.trim() || undefined,
     projectDirectory: task.projectDirectory?.trim() || undefined,
     source: task.source?.repository.trim()
       ? {

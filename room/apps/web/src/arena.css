@@ -10,6 +10,10 @@
 }
 .agent-slot {
   transform-style: preserve-3d;
+  pointer-events: none;
+}
+.agent-slot > .agent-slab {
+  pointer-events: auto;
 }
 .agent-slab {
   transform-style: preserve-3d;

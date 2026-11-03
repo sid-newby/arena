@@ -45,11 +45,24 @@ each agent separately.
 A model calls address_panelist with the other model's recipient ID before writing
 its reply. The completed reply is the one text body for its panel, speech, and
 peer input. Panelist messages wait when the recipient is busy. Human messages
-interrupt active panelist replies and take priority. A human-rooted exchange has
+use an explicit delivery action. After current reply saves a follow-up immediately
+and queues it while the seat works; Interrupt and send stops the current reply
+before starting the new one. Only when idle rejects a busy target. A human-rooted exchange has
 at most four automatic handoffs. Stop conversation stops both replies and queued
 deliveries; Stop audio only controls playback. Interrupted or queued deliveries
 are reconciled visibly after restart without automatic replay. Facing the peer
 changes orientation only and never sends a message.
+
+The main composer stays available during work. Saved message receipts show delivery
+state and permit cancellation of queued or unconfirmed messages. Both sends retain
+their original delivery intent and retry only destinations that did not acknowledge
+the request. Stop conversation cancels active work and queued main and side messages.
+
+Each seat also has a separate, text-only side conversation. Its session and history
+stay separate from the main task. Side replies have no workspace or task tools and
+do not become candidate outputs or speech. Closing the dialog preserves its draft
+and work. Use in main draft copies a chosen conclusion into the main composer for
+review; only a subsequent explicit send changes the task.
 
 Keep run control inside the existing application and provider transports. The
 approved Maestro increment adds private text-only orchestration and analysis
@@ -64,11 +77,12 @@ are separate from A/B messages. Opening, closing, sending, or stopping Maestro
 does not stop A/B work or change speech playback. Publication requires an explicit
 user action on a reviewed proposal.
 
-The Run tab reviews the question, success criteria, shared grounding, expected
-artifact, subscribed seat models, source commit, tool profile, handoff limit, and
-total time limit. Preparation gives A and B separate retained worktrees or scratch
-directories and checks that contained tools can start. Preparation does not start
-inference. Both independent outputs must finish before explicit comparison or
+The Run tab starts a read-only debate from a question and an optional evidence
+folder. One Start debate action saves the setup, prepares both seats, and starts
+independent work. The folder can contain uncommitted files or have no Git
+history. Both seats receive the same snapshot. Advanced settings cover success
+criteria, models, pinned commits, build tools, and time and handoff limits.
+Both independent outputs must finish before explicit comparison or
 discussion. Pausing waits for an output boundary; Stop aborts active A/B work.
 Interrupted work never replays automatically, and failed candidates require an
 explicit retry selection.
