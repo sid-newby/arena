@@ -240,7 +240,7 @@ Theme search, selects and import fields use background/foreground tokens, a bord
 
 ### Navigation
 
-The header carries a room nav beside the wordmark: Hangout, Debate and Prismatic Research Center as plain links, muted when inactive, reading-white with a two-pixel primary underline for the current room. Desktop keeps both colleagues visible. Mobile tabs use muted inactive text, reading-white active text and a two-pixel primary underline. Tabs retain semantic selection and keyboard behavior. The header’s Themes action opens the fixed right-hand drawer; its selectable preset tiles show swatches and a ring-colored selected border.
+The header carries a room nav beside the wordmark: Hangout, Debate and Prismatic Research Center as plain links (the last one leaves for the stage app on its own port), muted when inactive, reading-white with a two-pixel primary underline for the current room. Desktop keeps both colleagues visible. Mobile tabs use muted inactive text, reading-white active text and a two-pixel primary underline. Tabs retain semantic selection and keyboard behavior. The header’s Themes action opens the fixed right-hand drawer; its selectable preset tiles show swatches and a ring-colored selected border.
 
 ### Replies
 

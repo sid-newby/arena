@@ -114,19 +114,33 @@ body,
   animation: stage-blur-in 900ms ease-out both;
 }
 @keyframes stage-fade {
-  from { opacity: 0; }
+  from {
+    opacity: 0;
+  }
 }
 @keyframes stage-drift-up {
-  from { opacity: 0; translate: 0 24px; }
+  from {
+    opacity: 0;
+    translate: 0 24px;
+  }
 }
 @keyframes stage-drift-in {
-  from { opacity: 0; translate: -32px 0; }
+  from {
+    opacity: 0;
+    translate: -32px 0;
+  }
 }
 @keyframes stage-scale {
-  from { opacity: 0; scale: 0.92; }
+  from {
+    opacity: 0;
+    scale: 0.92;
+  }
 }
 @keyframes stage-blur-in {
-  from { opacity: 0; filter: blur(14px); }
+  from {
+    opacity: 0;
+    filter: blur(14px);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .stage-node {

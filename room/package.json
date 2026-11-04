@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "pnpm dev:speech",
-    "dev:speech": "pnpm --filter @lilbits/reporting build && pnpm ports:clear && PORT=58242 concurrently -k -n web,api -c cyan,magenta \"node scripts/wait-for-api.mjs && pnpm --filter @bay01/web dev\" \"node scripts/start-with-cartesia.mjs --watch\"",
-    "ports:clear": "node scripts/free-ports.mjs 58241 58242",
+    "dev:speech": "pnpm --filter @lilbits/reporting build && pnpm ports:clear && PORT=58242 concurrently -k -n web,stage,api -c cyan,yellow,magenta \"node scripts/wait-for-api.mjs && pnpm --filter @bay01/web dev\" \"pnpm --filter @bay01/stage dev\" \"node scripts/start-with-cartesia.mjs --watch\"",
+    "ports:clear": "node scripts/free-ports.mjs 58241 58242 58243",
     "build": "pnpm -r build",
     "test": "pnpm --filter @lilbits/reporting build && node scripts/check-test-layout.mjs && node --test test/scripts/wait-for-api.test.mjs && pnpm -r --if-present test",
     "test:e2e": "pnpm --filter @lilbits/reporting build && pnpm -r --if-present test:e2e",
@@ -14,7 +14,7 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "audit:prod": "pnpm audit --prod",
-    "dev:text": "pnpm --filter @lilbits/reporting build && pnpm ports:clear && PORT=58242 concurrently -k -n web,api -c cyan,magenta \"node scripts/wait-for-api.mjs && pnpm --filter @bay01/web dev\" \"pnpm --filter @bay01/api start:dev\""
+    "dev:text": "pnpm --filter @lilbits/reporting build && pnpm ports:clear && PORT=58242 concurrently -k -n web,stage,api -c cyan,yellow,magenta \"node scripts/wait-for-api.mjs && pnpm --filter @bay01/web dev\" \"pnpm --filter @bay01/stage dev\" \"pnpm --filter @bay01/api start:dev\""
   },
   "devDependencies": {
     "concurrently": "^10.0.6",

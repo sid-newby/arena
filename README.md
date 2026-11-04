@@ -41,7 +41,7 @@ records, and provider continuation IDs. Interrupted turns are shown as
 interrupted and do not replay on restart. The app binds to loopback for local
 use.
 
-The header links the three rooms. The hangout is the root, `/debate` is the structured Maestro workflow, and `/prismatic` is the Prismatic Research Center, a placeholder today that will draw its interface from the conversation with json-render.
+The header links the three rooms. The hangout is the root and `/debate` is the structured Maestro workflow, both served by the web app. The Prismatic Research Center is its own Vite app under `apps/stage`, served on port 58243 and linked from the header: a 1920x1080 stage that agents paint through a [json-render](https://github.com/vercel-labs/json-render) catalog. Its plan lives in [prismatic-research/stage-scaffold-plan.md](prismatic-research/stage-scaffold-plan.md).
 
 The separate `/debate` view retains the structured Maestro workflow. Each structured run also retains goal revisions, exact model attribution, available token
 observations, runtime timing, and explicitly reviewed outcomes. Maestro can
@@ -107,7 +107,7 @@ Use **Stop audio** to clear playback, or **Stop conversation** to stop both
 agents and queued peer messages. Speaking while a reply plays stops that
 playback.
 
-The web server listens on `127.0.0.1:58241`; Nest listens on `127.0.0.1:58242`.
+The web server listens on `127.0.0.1:58241`; Nest listens on `127.0.0.1:58242`; the stage listens on `127.0.0.1:58243`.
 Vite proxies `/api` to Nest. Startup clears listeners on those two ports, then
 waits up to 45 seconds for API health before starting the web app. The port
 cleanup script uses `lsof` and is intended for macOS or Linux.
@@ -128,8 +128,8 @@ commands below run from `room/`.
 
 | Command             | Purpose                                                    |
 | ------------------- | ---------------------------------------------------------- |
-| `pnpm dev`          | Start web and API with Cartesia speech configured from GCP |
-| `pnpm dev:text`     | Start web and API without speech or GCP access             |
+| `pnpm dev`          | Start web, stage, and API with Cartesia speech from GCP    |
+| `pnpm dev:text`     | Start web, stage, and API without speech or GCP access     |
 | `pnpm build`        | Build all workspace packages                               |
 | `pnpm test`         | Run startup checks and workspace unit tests                |
 | `pnpm test:e2e`     | Run available end-to-end suites                            |
@@ -138,8 +138,8 @@ commands below run from `room/`.
 | `pnpm format:check` | Check formatting with oxfmt                                |
 | `pnpm audit:prod`   | Audit production dependencies                              |
 
-For one package, prefix its script with `pnpm --filter @bay01/web` or
-`pnpm --filter @bay01/api`. The web package uses Vite, React, and TypeScript.
+For one package, prefix its script with `pnpm --filter @bay01/web`,
+`pnpm --filter @bay01/stage`, or `pnpm --filter @bay01/api`. The web package uses Vite, React, and TypeScript.
 The API uses NestJS and Vitest. Shared workspace packages live under `packages/`.
 
 ## Where things live
@@ -148,6 +148,7 @@ The API uses NestJS and Vitest. Shared workspace packages live under `packages/`
 Taskfile.yml            Root install, checks, and development commands
 room/
   apps/web/             Room UI, private Maestro, run setup, and artifact review
+  apps/stage/           Prismatic Research Center: a json-render stage on its own Vite server
   apps/api/             Provider runtimes, persistence, workflow, and tools
   apps/api/test/        API unit and HTTP tests
   apps/web/test/        Web behavior tests

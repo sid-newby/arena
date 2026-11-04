@@ -9,7 +9,7 @@ export function RoomNav({ current }: { current: RoomId }) {
       </h1>
       <nav className="room-nav" aria-label="Rooms">
         {rooms.map((room) => (
-          <a key={room.id} href={room.path} aria-current={room.id === current ? 'page' : undefined}>
+          <a key={room.id} href={room.href} aria-current={room.id === current ? 'page' : undefined}>
             {room.label}
           </a>
         ))}

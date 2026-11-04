@@ -13,7 +13,7 @@
   ],
   "overrides": [
     {
-      "files": ["apps/web/**"],
+      "files": ["apps/web/**", "apps/stage/**"],
       "plugins": ["react", "jsx-a11y"],
       "env": {
         "browser": true
