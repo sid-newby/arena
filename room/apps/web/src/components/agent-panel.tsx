@@ -260,7 +260,9 @@ export function AgentPanel({
   const busyTargets = targets.some((target) => agents[target].snapshot.status === 'working');
   const receipts = snapshot.humanMessages ?? [];
   const pendingMessages = receipts.filter(messagePending);
-  const latestReceipt = receipts.at(-1);
+  const deliveryFeedback =
+    receipts.find((message) => message.status === 'uncertain') ?? receipts.at(-1);
+  const deliveryPaused = deliveryFeedback?.status === 'uncertain';
   const visibleReceipts = receipts.filter(
     (message) => messagePending(message) || receipts.slice(-3).includes(message),
   );
@@ -609,9 +611,11 @@ export function AgentPanel({
             {!preview && visibleReceipts.length > 0 && (
               <details className="saved-messages">
                 <summary>
-                  {pendingMessages.length
-                    ? `${pendingMessages.length} pending message${pendingMessages.length === 1 ? '' : 's'}`
-                    : 'Recent sent messages'}
+                  {deliveryPaused
+                    ? 'Delivery paused · Review unconfirmed message'
+                    : pendingMessages.length
+                      ? `${pendingMessages.length} pending message${pendingMessages.length === 1 ? '' : 's'}`
+                      : 'Recent sent messages'}
                 </summary>
                 <ol>
                   {visibleReceipts.map((message) => (
@@ -641,13 +645,16 @@ export function AgentPanel({
                 </ol>
               </details>
             )}
-            {!preview && latestReceipt && (
+            {!preview && deliveryFeedback && (
               <output
-                className={`saved-message-feedback${latestReceipt.status === 'failed' || latestReceipt.status === 'uncertain' ? ' side-error' : ''}`}
+                className={`saved-message-feedback${deliveryFeedback.status === 'failed' || deliveryPaused ? ' side-error' : ''}`}
                 aria-live="polite"
               >
-                {receiptLabel(latestReceipt.status)}
-                {latestReceipt.error ? ` · ${latestReceipt.error}` : ''}
+                {deliveryPaused
+                  ? `Cancel the unconfirmed message to resume delivery to ${name}.`
+                  : [receiptLabel(deliveryFeedback.status), deliveryFeedback.error]
+                      .filter(Boolean)
+                      .join(' · ')}
               </output>
             )}
             <form
@@ -687,7 +694,11 @@ export function AgentPanel({
                 />
                 <InputGroupAddon align="block-end" className="composer-actions">
                   {hangout ? (
-                    <span className="text-xs text-muted-foreground">To everyone</span>
+                    <span className="text-xs text-muted-foreground">
+                      {targets.length === 1
+                        ? `To ${modelPanelName(agents[targets[0]].info?.model, targets[0])}`
+                        : 'To everyone'}
+                    </span>
                   ) : (
                     <fieldset className="destination" disabled={submitting || preview}>
                       <legend className="sr-only">Send destination for {accessibleName}</legend>
@@ -745,19 +756,11 @@ export function AgentPanel({
             </form>
             <div className="composer-caption">
               <span>
-                {busyTargets
-                  ? 'Stops the current reply before starting your message.'
-                  : destination === 'both'
-                    ? hangout
-                      ? !presenceReady
-                        ? 'Checking who is here…'
-                        : targets.length === 0
-                          ? 'The room is empty. Invite someone back to chat.'
-                          : targets.length === 1
-                            ? `Room message · ${modelPanelName(agents[targets[0]].info?.model, targets[0])} is here.`
-                            : 'Sid, Astra, and Fable share this conversation.'
-                      : 'One message. Two independent replies.'
-                    : 'Your prompt goes to the selected agent.'}
+                {hangout && !presenceReady
+                  ? 'Checking who is here…'
+                  : hangout && targets.length === 0
+                    ? 'The room is empty. Invite someone back to chat.'
+                    : 'New messages interrupt active replies.'}
               </span>
               <span>↵ send</span>
             </div>

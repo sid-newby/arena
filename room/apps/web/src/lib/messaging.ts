@@ -170,7 +170,7 @@ export function receiptLabel(status: MessageStatus): string {
     case 'cancelled':
       return 'Cancelled';
     case 'uncertain':
-      return 'Delivery unconfirmed after restart';
+      return 'Delivery unconfirmed';
   }
 }
 
