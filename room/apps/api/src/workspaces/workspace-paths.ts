@@ -7,6 +7,7 @@ export function workspacePaths() {
     process.env.ROOM_WORKSPACE ?? fileURLToPath(new URL('../../../../', import.meta.url)),
   );
   return {
+    roomRoot,
     controlRoot: resolve(
       process.env.ROOM_CONTROL_HOME ?? join(homedir(), '.local', 'state', 'lilbits'),
       'workbench',

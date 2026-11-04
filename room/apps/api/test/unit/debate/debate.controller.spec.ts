@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -10,6 +10,7 @@ import { AppModule } from '../../../src/app.module.js';
 import { configureApp } from '../../../src/app.setup.js';
 import { ChatService } from '../../../src/chat/chat.service.js';
 import { WorkspaceManager } from '../../../src/workspaces/workspace-manager.js';
+import type { TaskDraft } from '../../../src/runs/run.contract.js';
 import {
   MAESTRO_RUN_TOOLS,
   type MaestroRunToolProvider,
@@ -17,6 +18,7 @@ import {
 
 describe('Debate artifact HTTP boundary', () => {
   let app: INestApplication<App>, directory: string, runId: string, artifactId: string;
+  let chat: ChatService;
   let tools: MaestroRunToolProvider;
   const html = '<script>document.body.dataset.ready="yes"</script><h1>Candidate</h1>';
   beforeEach(async () => {
@@ -28,7 +30,8 @@ describe('Debate artifact HTTP boundary', () => {
     app = moduleRef.createNestApplication();
     configureApp(app, { webPort: 58421, apiPort: 58422 });
     await app.init();
-    runId = moduleRef.get(ChatService).currentRun().id;
+    chat = moduleRef.get(ChatService);
+    runId = chat.currentRun().id;
     tools = moduleRef.get<MaestroRunToolProvider>(MAESTRO_RUN_TOOLS);
     const manager = new WorkspaceManager({ controlRoot: join(directory, 'workbench') });
     await manager.provision({ runId });
@@ -69,6 +72,53 @@ describe('Debate artifact HTTP boundary', () => {
       .expect(200);
     expect(download.headers['content-disposition']).toContain('attachment;');
     expect(download.text).toBe(html);
+  });
+  it('serves workflow history and saved artifacts when the project directory is deleted', async () => {
+    const projectDirectory = join(realpathSync(directory), 'deleted-project');
+    mkdirSync(projectDirectory);
+    const run = chat.createRun();
+    const task = {
+      question: 'Compare two small approaches.',
+      mode: 'reasoning',
+      expectedArtifact: 'Evidence and a recommendation.',
+      criteria: ['Correctness'],
+      grounding: ['Shared input.'],
+      source: null,
+      projectDirectory,
+      profile: 'analysis',
+      maxHandoffs: 1,
+      timeLimitSeconds: 60,
+    } satisfies TaskDraft;
+    await request(app.getHttpServer())
+      .post(`/api/runs/${run.id}/task`)
+      .set('Host', '127.0.0.1:58422')
+      .send({ expectedRevision: run.revision, task })
+      .expect(201);
+    const manager = new WorkspaceManager({ controlRoot: join(directory, 'workbench') });
+    await manager.provision({ runId: run.id, projectDirectory });
+    const artifact = manager.publish({
+      workspace: manager.workspace(run.id, 'a'),
+      turnId: 'saved-turn',
+      path: 'result.md',
+      content: Buffer.from('A saved result.'),
+    });
+    rmSync(projectDirectory, { recursive: true });
+
+    const workflow = await request(app.getHttpServer())
+      .get(`/api/runs/${run.id}/workflow`)
+      .set('Host', '127.0.0.1:58422')
+      .expect(200);
+    expect(workflow.body.task).toEqual(task);
+    expect(workflow.body.workspaces).toBeNull();
+    expect(workflow.body.workspaceError).toContain(projectDirectory);
+    expect(workflow.body.workspaceError).toContain('Create a new run');
+    expect(workflow.body.artifacts).toContainEqual(expect.objectContaining({ id: artifact.id }));
+    const saved = await request(app.getHttpServer())
+      .get(`/api/runs/${run.id}/artifacts/${artifact.id}`)
+      .set('Host', '127.0.0.1:58422')
+      .expect(200);
+    expect(saved.body.text).toBe('A saved result.');
+    expect(existsSync(projectDirectory)).toBe(false);
   });
   it('preserves local host and origin protection on custom test ports', async () => {
     const route = `/api/runs/${runId}/workflow`;

@@ -2,6 +2,7 @@ import { parseProviderConfig } from '../runs/provider-config.js';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { isAbsolute } from 'node:path';
 import type {
   ActionProposal,
   RunSnapshot,
@@ -22,6 +23,7 @@ export interface WorkflowRecord {
   pauseRequested: boolean;
   handoffs: number;
   error?: string;
+  evidenceFolderFromPrompt?: true;
   proposedSeats?: Record<SeatId, import('../runs/run.contract.js').ProviderConfig>;
 }
 export function object(value: unknown): value is Record<string, unknown> {
@@ -102,6 +104,17 @@ export function parseTask(value: unknown): TaskDraft {
       value.projectDirectory.length > 4096)
   )
     throw new BadRequestException('Choose a valid project directory.');
+  const evidenceFolder =
+    value.evidenceFolder === undefined ? undefined : string('evidenceFolder', 4096, true);
+  if (evidenceFolder && (!isAbsolute(evidenceFolder) || evidenceFolder.includes('\0')))
+    throw new BadRequestException('Choose an absolute evidence folder path.');
+  if (
+    evidenceFolder &&
+    (source || scaffold || value.projectDirectory || value.profile !== 'analysis')
+  )
+    throw new BadRequestException(
+      'Use an evidence folder with a read-only debate and no other project source or destination.',
+    );
   const task: TaskDraft = {
     question: string('question', 6000, true),
     mode: value.mode,
@@ -109,6 +122,7 @@ export function parseTask(value: unknown): TaskDraft {
     criteria: strings('criteria', 8, 500),
     grounding: strings('grounding', 20, 1000),
     source,
+    ...(evidenceFolder ? { evidenceFolder } : {}),
     ...(typeof value.projectDirectory === 'string'
       ? { projectDirectory: value.projectDirectory.trim() }
       : {}),
@@ -197,7 +211,8 @@ export class WorkflowStore {
       typeof value.pauseRequested !== 'boolean' ||
       typeof value.handoffs !== 'number' ||
       !Number.isSafeInteger(value.handoffs) ||
-      (value.error !== undefined && typeof value.error !== 'string')
+      (value.error !== undefined && typeof value.error !== 'string') ||
+      (value.evidenceFolderFromPrompt !== undefined && value.evidenceFolderFromPrompt !== true)
     )
       throw new Error('Stored workflow state is invalid.');
     const turns = value.turns;
@@ -238,6 +253,7 @@ export class WorkflowStore {
       handoffs: value.handoffs,
       ...(value.error ? { error: value.error } : {}),
       ...(proposedSeats ? { proposedSeats } : {}),
+      ...(value.evidenceFolderFromPrompt === true ? { evidenceFolderFromPrompt: true } : {}),
     };
   }
   write(id: string, record: WorkflowRecord) {

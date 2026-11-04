@@ -4,6 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { api, parseRunReference } from '@/lib/agents';
+import { subscribeRoomEvents } from '@/lib/room-events';
+import { parseWorkflowInvalidation } from '@/lib/messaging';
+import { waitForMaestroTurn } from '@/lib/maestro';
 import {
   defaultTask,
   cleanTask,
@@ -22,6 +25,7 @@ import {
   type WorkflowSnapshot,
 } from '@/lib/run-workflow';
 import { runPresentation } from '@/lib/run-presentation';
+import { isSimpleDebate, startDebate } from '@/lib/start-debate';
 import { RunArtifacts } from '@/components/run-artifacts';
 import { ScaffoldPicker } from '@/components/scaffold-picker';
 import { RunReports } from '@/components/run-reports';
@@ -90,7 +94,6 @@ function parsePreflight(value: unknown): Preflight {
   };
 }
 const activePhases = ['preparing', 'independent', 'comparison', 'discussion'];
-const steps = ['Question', 'Success', 'Project', 'Models', 'Review'] as const;
 
 function renderPreflightDetails(result: Preflight) {
   return (
@@ -216,6 +219,9 @@ function readDraft(snapshot: WorkflowSnapshot): Editor | undefined {
                   typeof task.source.repository === 'string' ? task.source.repository : '',
                 revision: typeof task.source.revision === 'string' ? task.source.revision : '',
               },
+        ...('evidenceFolder' in task && typeof task.evidenceFolder === 'string'
+          ? { evidenceFolder: task.evidenceFolder }
+          : {}),
         ...('projectDirectory' in task && typeof task.projectDirectory === 'string'
           ? { projectDirectory: task.projectDirectory }
           : {}),
@@ -271,12 +277,16 @@ export function useRunSetup({
   const [pendingOperation, setOperation] = useState<{ scope: Lease; label: string }>();
   const [stoppingScope, setStoppingScope] = useState<Lease>();
   const [draftOpen, setDraftOpen] = useState(true);
+  const startAttempt = useRef<
+    { runId: string; setup: string; baseline: WorkflowSnapshot; revision: number } | undefined
+  >(undefined);
   const [reuseSelection, setReuseSelection] = useState<{
     runId: string | undefined;
     value: '' | 'recorded' | 'head';
   }>({ runId, value: '' });
   const reuseRevision = reuseSelection.runId === runId ? reuseSelection.value : '';
   const [copyNotice, setCopyNotice] = useState<{ runId: string; text: string }>();
+  const [browsingEvidence, setBrowsingEvidence] = useState(false);
   const [browsingRepository, setBrowsingRepository] = useState(false);
   const [browsingProject, setBrowsingProject] = useState(false);
   const [criteriaSuggestion, setCriteriaSuggestion] = useState<{
@@ -290,11 +300,10 @@ export function useRunSetup({
   const [checkingPreflight, setCheckingPreflight] = useState(false);
   const currentEditor = useRef<Editor>(undefined);
   currentEditor.current = editor;
-  const [step, setStep] = useState(0);
+  const [advancedSettings, setAdvancedSettings] = useState<{ runId: string; open: boolean }>();
   if (reuseSelection.runId !== runId) {
     setReuseSelection({ runId, value: '' });
     setDraftOpen(true);
-    setStep(0);
   }
   const [catalogs, setCatalogs] = useState<Partial<Record<'codex' | 'anthropic', ProviderCatalog>>>(
     {},
@@ -329,8 +338,14 @@ export function useRunSetup({
   const recoveryReady = Boolean(
     recovery && recovery.runId === runId && recovery.revision === visible?.revision,
   );
+  const retryingStart = Boolean(
+    draft &&
+    startAttempt.current &&
+    startAttempt.current.runId === runId &&
+    startAttempt.current.setup === JSON.stringify([draft.task, draft.seats]),
+  );
   const changedElsewhere = Boolean(
-    draft?.dirty && visible && draft.baseRevision !== visible.revision,
+    draft?.dirty && visible && draft.baseRevision !== visible.revision && !retryingStart,
   );
   const preflightKey = draft && runId ? JSON.stringify([runId, draft.task, draft.seats]) : '';
   const currentPreflight = preflight?.key === preflightKey ? preflight.result : undefined;
@@ -431,18 +446,51 @@ export function useRunSetup({
     const scope = lease.current;
     if (!scope || !active) return;
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      await refresh(scope);
-      if (!cancelled && !scope.controller.signal.aborted)
-        timer = setTimeout(() => void poll(), 2000);
+    let running = false;
+    let requested = false;
+    let cursor = -1;
+    let revision = -1;
+    const drain = async () => {
+      if (running) return;
+      running = true;
+      try {
+        while (requested) {
+          if (cancelled || scope.controller.signal.aborted) break;
+          requested = false;
+          await refresh(scope);
+        }
+      } finally {
+        running = false;
+      }
     };
-    void poll();
+    const request = () => {
+      requested = true;
+      void drain();
+    };
+    const unsubscribe = subscribeRoomEvents(scope.runId, 'workflow', {
+      message: ({ data }) => {
+        if (cancelled || scope.controller.signal.aborted) return;
+        try {
+          const incoming = parseWorkflowInvalidation(JSON.parse(data), scope.runId);
+          if (incoming.cursor <= cursor && incoming.revision <= revision) return;
+          cursor = Math.max(cursor, incoming.cursor);
+          revision = Math.max(revision, incoming.revision);
+          request();
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : 'Unreadable run update.');
+        }
+      },
+      error: () => {
+        cursor = -1;
+        revision = -1;
+      },
+    });
+    request();
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      unsubscribe();
     };
-  }, [runId, active, refresh]);
+  }, [runId, active, refresh, setError]);
 
   useEffect(() => {
     if (!active) return;
@@ -490,9 +538,16 @@ export function useRunSetup({
     });
   }
   function edit(change: (previous: Editor) => Editor) {
-    setEditor((previous) =>
-      previous && previous.runId === runId ? { ...change(previous), dirty: true } : previous,
-    );
+    startAttempt.current = undefined;
+    setEditor((previous) => {
+      if (!previous || previous.runId !== runId) return previous;
+      const next = change(previous);
+      return {
+        ...next,
+        task: isSimpleDebate(next.task) ? next.task : { ...next.task, evidenceFolder: undefined },
+        dirty: true,
+      };
+    });
     setNotice(undefined);
   }
   function taskField<K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) {
@@ -575,49 +630,45 @@ export function useRunSetup({
           signal: scope.controller.signal,
         },
       );
-      for (let attempt = 0; attempt < 180; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        if (scope.controller.signal.aborted || lease.current !== scope) return;
-        const result = await api(
-          `${prefix}/${encodeURIComponent(created)}`,
-          (value) => {
-            if (!value || typeof value !== 'object' || !('status' in value))
-              throw new Error('Unreadable criteria result.');
-            return value;
-          },
-          { signal: scope.controller.signal },
+      await waitForMaestroTurn(runId, created, scope.controller.signal);
+      if (scope.controller.signal.aborted || lease.current !== scope) return;
+      const result = await api(
+        `${prefix}/${encodeURIComponent(created)}`,
+        (value) => {
+          if (!value || typeof value !== 'object' || !('status' in value))
+            throw new Error('Unreadable criteria result.');
+          return value;
+        },
+        { signal: scope.controller.signal },
+      );
+      if (result.status === 'failed')
+        throw new Error(
+          'error' in result && typeof result.error === 'string'
+            ? result.error
+            : 'Criteria generation failed.',
         );
-        if (result.status === 'working') continue;
-        if (result.status === 'failed')
-          throw new Error(
-            'error' in result && typeof result.error === 'string'
-              ? result.error
-              : 'Criteria generation failed.',
-          );
-        if (
-          result.status !== 'completed' ||
-          !('criteria' in result) ||
-          !Array.isArray(result.criteria) ||
-          !result.criteria.every((item: unknown) => typeof item === 'string')
-        )
-          throw new Error('Unreadable criteria result.');
-        if (
-          currentEditor.current?.runId !== runId ||
-          JSON.stringify(currentEditor.current.task) !== captured ||
-          currentEditor.current.baseRevision !== draft.baseRevision
-        ) {
-          setError('The setup changed while Maestro was working. Generate criteria again.');
-          return;
-        }
-        setCriteriaSuggestion({
-          runId,
-          task: captured,
-          revision: draft.baseRevision,
-          criteria: result.criteria,
-        });
+      if (
+        result.status !== 'completed' ||
+        !('criteria' in result) ||
+        !Array.isArray(result.criteria) ||
+        !result.criteria.every((item: unknown) => typeof item === 'string')
+      )
+        throw new Error('Unreadable criteria result.');
+      if (
+        currentEditor.current?.runId !== runId ||
+        JSON.stringify(currentEditor.current.task) !== captured ||
+        currentEditor.current.baseRevision !== draft.baseRevision
+      ) {
+        setError('The setup changed while Maestro was working. Generate criteria again.');
         return;
       }
-      throw new Error('Maestro is still working. Check the private chat for its response.');
+      setCriteriaSuggestion({
+        runId,
+        task: captured,
+        revision: draft.baseRevision,
+        criteria: result.criteria,
+      });
+      return;
     } catch (cause) {
       if (lease.current === scope && !scope.controller.signal.aborted)
         setError(cause instanceof Error ? cause.message : 'Could not generate criteria.');
@@ -663,9 +714,55 @@ export function useRunSetup({
       setSnapshot(saved);
       clearDraft(scope.runId);
       setEditor(cloneEditor(saved));
+      setDraftOpen(isSimpleDebate(saved.task ?? task));
+      requestAnimationFrame(() => workbench.current?.scrollTo({ top: 0 }));
+      setNotice(
+        isSimpleDebate(task)
+          ? 'Draft saved. Choose Start debate when you are ready.'
+          : 'Draft saved. Prepare the workspaces before starting.',
+      );
+    });
+  }
+  function beginDebate() {
+    if (!draft || !visible || changedElsewhere) return;
+    const captured = draft;
+    const setup = JSON.stringify([captured.task, captured.seats]);
+    const previousAttempt = startAttempt.current;
+    const attempt =
+      previousAttempt && previousAttempt.runId === runId && previousAttempt.setup === setup
+        ? previousAttempt
+        : { runId: visible.runId, setup, baseline: visible, revision: captured.baseRevision };
+    startAttempt.current = attempt;
+    void mutate('Starting debate', async (scope) => {
+      const result = await startDebate({
+        baseline: attempt.baseline,
+        expectedRevision: attempt.revision,
+        task: captured.task,
+        seats: captured.seats,
+        signal: scope.controller.signal,
+        identity,
+        assertCurrent: () => {
+          if (lease.current !== scope || scope.controller.signal.aborted)
+            throw new Error('The selected run changed.');
+        },
+        onProgress: (label) => setOperation({ scope, label }),
+        onRevision: (revision) =>
+          setEditor((previous) =>
+            previous?.runId === scope.runId ? { ...previous, baseRevision: revision } : previous,
+          ),
+        onSaved: (saved) => {
+          setSnapshot(saved);
+          clearDraft(scope.runId);
+          setEditor(cloneEditor(saved));
+        },
+      });
       setDraftOpen(false);
       requestAnimationFrame(() => workbench.current?.scrollTo({ top: 0 }));
-      setNotice('Draft saved. Prepare the workspaces before starting.');
+      setNotice(
+        result.phase === 'independent'
+          ? 'Independent work started in A and B.'
+          : 'The debate has already started. Its saved state is shown below.',
+      );
     });
   }
   function command(
@@ -786,7 +883,6 @@ export function useRunSetup({
           // The completed receipt remains safe to retry.
         }
         setReuseSelection({ runId, value: '' });
-        setStep(0);
         setDraftOpen(true);
         window.dispatchEvent(new Event('lilbits-run-changed'));
       }
@@ -855,6 +951,9 @@ export function useRunSetup({
         )}
       </div>,
     );
+
+  const simpleTask = isSimpleDebate(draft.task);
+  const advancedOpen = advancedSettings?.runId === runId ? advancedSettings.open : !simpleTask;
 
   return present(
     <div ref={workbench} className="run-workbench" aria-busy={Boolean(operation)}>
@@ -959,7 +1058,7 @@ export function useRunSetup({
           </button>
         </p>
       )}
-      {visible.task && (
+      {visible.task && (!editable || !simpleTask) && (
         <section className="run-review" aria-label="Reviewed task">
           <p className="run-question">{visible.task.question}</p>
           <dl>
@@ -994,7 +1093,9 @@ export function useRunSetup({
             <div>
               <dt>Source</dt>
               <dd>
-                {visible.workspaces?.source ? (
+                {visible.task.evidenceFolder ? (
+                  `Evidence folder: ${visible.task.evidenceFolder}`
+                ) : visible.workspaces?.source ? (
                   <>
                     <span>{visible.workspaces.source.repository}</span>
                     <code>{visible.workspaces.source.revision}</code>
@@ -1048,7 +1149,7 @@ export function useRunSetup({
           </Button>
         </section>
       )}
-      {visible.task && ['draft', 'ready', 'failed'].includes(visible.phase) && (
+      {!simpleTask && visible.task && ['draft', 'ready', 'failed'].includes(visible.phase) && (
         <section className="run-review" aria-label="Preflight checks">
           <h4>Preflight checks</h4>
           <p className="run-muted">
@@ -1109,7 +1210,7 @@ export function useRunSetup({
         </section>
       )}
       <div className="run-phase-controls">
-        {visible.task && ['draft', 'ready', 'failed'].includes(visible.phase) && (
+        {!simpleTask && visible.task && ['draft', 'ready', 'failed'].includes(visible.phase) && (
           <Button
             size="sm"
             variant="secondary"
@@ -1122,7 +1223,7 @@ export function useRunSetup({
             {visible.phase === 'ready' ? 'Prepare again' : 'Prepare workspaces'}
           </Button>
         )}
-        {visible.phase === 'ready' && (
+        {!simpleTask && visible.phase === 'ready' && (
           <Button
             size="sm"
             disabled={
@@ -1243,27 +1344,16 @@ export function useRunSetup({
           open={draftOpen}
           onToggle={(event) => setDraftOpen(event.currentTarget.open)}
         >
-          <summary>{visible.task ? 'Edit task and models' : 'Set up the task'}</summary>
+          <summary>{visible.task ? 'Edit debate setup' : 'Set up a debate'}</summary>
           <form
             noValidate
             onSubmit={(event) => {
               event.preventDefault();
-              save();
+              if (simpleTask) beginDebate();
+              else save();
             }}
           >
-            <nav className="run-steps" aria-label="Setup steps">
-              {steps.map((label, index) => (
-                <button
-                  key={label}
-                  type="button"
-                  aria-current={step === index ? 'step' : undefined}
-                  onClick={() => setStep(index)}
-                >
-                  {index + 1}. {label}
-                </button>
-              ))}
-            </nav>
-            <div hidden={step !== 0}>
+            <div>
               <label htmlFor={`${fieldPrefix}-question`}>Question or task</label>
               <Textarea
                 id={`${fieldPrefix}-question`}
@@ -1276,121 +1366,84 @@ export function useRunSetup({
                 onChange={(event) => taskField('question', event.target.value)}
                 placeholder="What should A and B work out independently?"
               />
-              <div className="run-field-grid">
-                <label>
-                  Task mode
-                  <select
-                    value={draft.task.mode}
-                    onChange={(event) =>
-                      edit((previous) => ({
-                        ...previous,
-                        task: {
-                          ...previous.task,
-                          mode: event.target.value === 'prototype' ? 'prototype' : 'reasoning',
-                          profile:
-                            event.target.value === 'prototype' ? 'build' : previous.task.profile,
-                        },
-                      }))
-                    }
-                  >
-                    <option value="reasoning">Reasoning and analysis</option>
-                    <option value="prototype">Competing prototypes</option>
-                  </select>
-                </label>
-                <label>
-                  Tool access
-                  <select
-                    value={draft.task.profile}
-                    disabled={draft.task.mode === 'prototype'}
-                    onChange={(event) =>
-                      taskField('profile', event.target.value === 'build' ? 'build' : 'analysis')
-                    }
-                  >
-                    <option value="analysis">Read and search local files</option>
-                    <option value="build">Create files and run code</option>
-                  </select>
-                </label>
-              </div>
             </div>
-            <div hidden={step !== 1}>
-              <label htmlFor={`${fieldPrefix}-artifact`}>Intended result</label>
-              <Input
-                id={`${fieldPrefix}-artifact`}
-                maxLength={1000}
-                value={draft.task.expectedArtifact}
-                onChange={(event) => taskField('expectedArtifact', event.target.value)}
-                placeholder="An answer, analysis, report, or working prototype"
-              />
-              <Button
-                type="button"
-                size="sm"
-                disabled={generatingCriteria || !draft.task.question.trim()}
-                onClick={() => void generateCriteria()}
-              >
-                {generatingCriteria ? 'Generating criteria…' : 'Auto-generate criteria'}
-              </Button>
-              {criteriaSuggestion?.runId === runId && (
-                <section aria-label="Suggested acceptance criteria">
-                  <p>Maestro suggested:</p>
-                  <ul>
-                    {criteriaSuggestion.criteria.map((criterion, index) => (
-                      <li key={`${index}-${criterion}`}>{criterion}</li>
-                    ))}
-                  </ul>
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={
-                      criteriaSuggestion.task !== JSON.stringify(draft.task) ||
-                      criteriaSuggestion.revision !== draft.baseRevision
-                    }
-                    onClick={() => {
-                      taskField('criteria', criteriaSuggestion.criteria);
-                      setCriteriaSuggestion(undefined);
+            {simpleTask ? (
+              <div>
+                <label htmlFor={`${fieldPrefix}-evidence`}>Evidence folder, optional</label>
+                <Input
+                  id={`${fieldPrefix}-evidence`}
+                  disabled={Boolean(visible.workspaces)}
+                  value={draft.task.evidenceFolder ?? ''}
+                  onChange={(event) => taskField('evidenceFolder', event.target.value || undefined)}
+                  placeholder="Folder with files for A and B to read"
+                  aria-describedby={`${fieldPrefix}-evidence-help`}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={Boolean(visible.workspaces)}
+                  onClick={() => setBrowsingEvidence(true)}
+                >
+                  <FolderOpen aria-hidden="true" /> Browse folders
+                </Button>
+                <p id={`${fieldPrefix}-evidence-help`} className="run-muted">
+                  Both seats get the current files, including uncommitted changes. You can also
+                  paste a project path from the room’s evidence locker into your question.
+                </p>
+                {visible.workspaces && (
+                  <p className="run-muted">
+                    Evidence is frozen for this run. Choose New run to use another folder or refresh
+                    its files.
+                  </p>
+                )}
+                {browsingEvidence && !visible.workspaces && (
+                  <RepositoryBrowser
+                    key={`evidence:${runId}`}
+                    evidence
+                    onClose={() => setBrowsingEvidence(false)}
+                    onSelect={(path) => {
+                      taskField('evidenceFolder', path);
+                      setBrowsingEvidence(false);
                     }}
-                  >
-                    Use suggested criteria
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setCriteriaSuggestion(undefined)}
-                  >
-                    Discard suggestion
-                  </Button>
-                  {(criteriaSuggestion.task !== JSON.stringify(draft.task) ||
-                    criteriaSuggestion.revision !== draft.baseRevision) && (
-                    <p>The setup changed. Generate a new suggestion.</p>
-                  )}
-                </section>
-              )}
-              <div className="run-field-grid">
-                <label htmlFor={`${fieldPrefix}-criteria`}>
-                  Success criteria, one per line
-                  <Textarea
-                    id={`${fieldPrefix}-criteria`}
-                    className="resize-none"
-                    rows={3}
-                    maxLength={3000}
-                    value={draft.task.criteria.join('\n')}
-                    onChange={(event) => taskField('criteria', event.target.value.split('\n'))}
                   />
-                </label>
-                <label htmlFor={`${fieldPrefix}-grounding`}>
-                  Shared notes and references
-                  <Textarea
-                    id={`${fieldPrefix}-grounding`}
-                    className="resize-none"
-                    rows={3}
-                    maxLength={4000}
-                    value={draft.task.grounding.join('\n')}
-                    onChange={(event) => taskField('grounding', event.target.value.split('\n'))}
-                  />
-                </label>
+                )}
               </div>
-            </div>
-            <div hidden={step !== 3}>
+            ) : draft.task.source &&
+              draft.task.mode === 'reasoning' &&
+              draft.task.profile === 'analysis' ? (
+              <div className="run-review">
+                <p>This setup uses a Git commit from {draft.task.source.repository}.</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={Boolean(visible.workspaces)}
+                  onClick={() => {
+                    edit((previous) => ({
+                      ...previous,
+                      task: {
+                        ...previous.task,
+                        evidenceFolder: previous.task.source?.repository,
+                        source: null,
+                        scaffold: undefined,
+                        projectDirectory: undefined,
+                      },
+                    }));
+                    setAdvancedSettings({ runId, open: false });
+                  }}
+                >
+                  Use this folder as evidence instead
+                </Button>
+                <p className="run-muted">
+                  Uses the folder’s current files, including uncommitted changes, instead of a
+                  pinned Git commit.{' '}
+                  {visible.workspaces &&
+                    'Choose New run or Use this setup again before changing the source.'}
+                </p>
+              </div>
+            ) : null}
+            <div>
               <div className="run-model-grid">
                 {(['a', 'b'] as const).map((seat) => (
                   <RunSeatModel
@@ -1430,240 +1483,376 @@ export function useRunSetup({
                 Refresh subscribed models
               </Button>
             </div>
-            <div hidden={step !== 2}>
-              <ScaffoldPicker
-                value={draft.task.scaffold?.id ?? ''}
-                onChange={(id) =>
-                  edit((previous) => ({
-                    ...previous,
-                    task: {
-                      ...previous.task,
-                      scaffold: id ? { id } : undefined,
-                      source: id ? null : previous.task.source,
-                    },
-                  }))
-                }
-              />
-              {draft.task.scaffold && (
-                <p className="run-muted">
-                  The selected template is pinned during preparation. Each seat receives its own
-                  project worktree.
-                </p>
-              )}
-              <label htmlFor={`${fieldPrefix}-project-directory`}>
-                Project destination, optional
-              </label>
-              <Input
-                id={`${fieldPrefix}-project-directory`}
-                value={draft.task.projectDirectory ?? ''}
-                onChange={(event) => taskField('projectDirectory', event.target.value || undefined)}
-                placeholder="Choose a project folder"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setBrowsingProject(true)}
-              >
-                <FolderOpen aria-hidden="true" /> Browse project folders
-              </Button>
-              {browsingProject && (
-                <RepositoryBrowser
-                  key={`project:${runId}`}
-                  onClose={() => setBrowsingProject(false)}
-                  onSelect={(path) => {
-                    taskField('projectDirectory', path);
-                    setBrowsingProject(false);
-                  }}
-                />
-              )}
-              <p className="run-muted">
-                Preparation initializes an empty folder as a Git project. Choose an existing Git
-                repository or an empty folder. Completed results are saved separately in its managed
-                folder.
-              </p>
-              <fieldset disabled={Boolean(draft.task.scaffold)}>
-                <label htmlFor={`${fieldPrefix}-repository`}>Repository folder, optional</label>
-                <Input
-                  id={`${fieldPrefix}-repository`}
-                  value={draft.task.source?.repository ?? ''}
-                  onChange={(event) =>
-                    taskField(
-                      'source',
-                      event.target.value
-                        ? {
-                            repository: event.target.value,
-                            revision: draft.task.source?.revision || 'HEAD',
-                          }
-                        : null,
-                    )
+            {simpleTask && (
+              <div className="run-buttons">
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={
+                    busy ||
+                    changedElsewhere ||
+                    !draft.task.question.trim() ||
+                    !['draft', 'ready', 'failed'].includes(visible.phase)
                   }
-                  placeholder="Leave blank for separate scratch workspaces"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setBrowsingRepository(true)}
                 >
-                  <FolderOpen aria-hidden="true" /> Browse folders
+                  <Play aria-hidden="true" /> Start debate
                 </Button>
-                {browsingRepository && (
-                  <RepositoryBrowser
-                    key={runId}
-                    onClose={() => setBrowsingRepository(false)}
-                    onSelect={(path) => {
-                      taskField('source', {
-                        repository: path,
-                        revision: draft.task.source?.revision || 'HEAD',
-                      });
-                      setBrowsingRepository(false);
-                    }}
-                  />
-                )}
-                {draft.task.source && (
-                  <label htmlFor={`${fieldPrefix}-revision`}>
-                    Source revision
-                    <Input
-                      id={`${fieldPrefix}-revision`}
-                      value={draft.task.source.revision}
-                      onChange={(event) =>
-                        taskField('source', {
-                          repository: draft.task.source?.repository ?? '',
-                          revision: event.target.value,
-                        })
-                      }
-                      placeholder="HEAD or an immutable commit"
-                    />
-                  </label>
-                )}
-                <p className="run-muted">
-                  Preparation records the exact commit. Uncommitted source changes are excluded.
-                </p>
-              </fieldset>
-              <div className="run-field-grid">
-                <label htmlFor={`${fieldPrefix}-handoffs`}>
-                  Automatic handoffs, 0–8
-                  <Input
-                    id={`${fieldPrefix}-handoffs`}
-                    type="number"
-                    min={0}
-                    max={8}
-                    value={draft.task.maxHandoffs}
-                    aria-invalid={draft.task.maxHandoffs < 0 || draft.task.maxHandoffs > 8}
-                    onChange={(event) => taskField('maxHandoffs', Number(event.target.value))}
-                  />
-                </label>
-                <label htmlFor={`${fieldPrefix}-seconds`}>
-                  Time limit in seconds, 30–3600
-                  <Input
-                    id={`${fieldPrefix}-seconds`}
-                    type="number"
-                    min={30}
-                    max={3600}
-                    value={draft.task.timeLimitSeconds}
-                    aria-invalid={
-                      draft.task.timeLimitSeconds < 30 || draft.task.timeLimitSeconds > 3600
-                    }
-                    onChange={(event) => taskField('timeLimitSeconds', Number(event.target.value))}
-                  />
-                </label>
               </div>
-            </div>
-            {step === 4 && (
-              <section className="run-review" aria-label="Review setup">
-                <h4>Review setup</h4>
-                <p className="run-question">
-                  {draft.task.question || 'Add a question to continue.'}
-                </p>
-                <p>Result: {draft.task.expectedArtifact || 'Not specified'}</p>
-                <p>
-                  Criteria:{' '}
-                  {draft.task.criteria.filter((item) => item.trim()).join('; ') || 'None yet'}
-                </p>
-                <p>
-                  Project destination: {draft.task.projectDirectory || 'Managed workspace storage'}
-                </p>
-                <p>
-                  Source:{' '}
-                  {draft.task.source
-                    ? `${draft.task.source.repository} at ${draft.task.source.revision}`
-                    : draft.task.scaffold
-                      ? `Scaffold ${draft.task.scaffold.id}`
-                      : 'Independent scratch directories'}
-                </p>
-                <p>
-                  A: {draft.seats.a.model} · {draft.seats.a.effort}
-                  <br />
-                  B: {draft.seats.b.model} · {draft.seats.b.effort}
-                </p>
-                {visible.workspaces && (
-                  <p>
-                    A: {visible.workspaces.seats.a.root}
-                    <br />
-                    B: {visible.workspaces.seats.b.root}
-                  </p>
-                )}
-                <p className="run-muted">
-                  Preflight checks model availability, source or scaffold selection, and destination
-                  permissions. Preparation also verifies sandbox tools.
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={busy || checkingPreflight || !draft.task.question.trim()}
-                  onClick={() => void checkPreflight()}
-                >
-                  {checkingPreflight ? 'Checking…' : 'Check setup'}
-                </Button>
-                {currentPreflight && (
-                  <p className="run-muted">
-                    {preflightPassed ? 'Checks passed.' : 'Some checks need attention.'}
-                  </p>
-                )}
-                {currentPreflight && renderPreflightDetails(currentPreflight)}
-              </section>
             )}
-            <div className="run-buttons">
-              {step > 0 && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => setStep(step - 1)}>
-                  Back
-                </Button>
-              )}
-              {step < steps.length - 1 && (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={step === 0 && !draft.task.question.trim()}
-                  onClick={() => setStep(step + 1)}
-                >
-                  Next
-                </Button>
-              )}
-              <Button
-                type="submit"
-                size="sm"
-                disabled={step !== 4 || busy || changedElsewhere || !draft.task.question.trim()}
-              >
-                Save draft
-              </Button>
-              {draft.dirty && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => {
-                    clearDraft(visible.runId);
-                    setEditor(cloneEditor(visible));
-                    setError(undefined);
-                  }}
-                >
-                  Discard edits
-                </Button>
-              )}
-            </div>
+            <details
+              className="run-advanced"
+              open={advancedOpen}
+              onToggle={(event) => setAdvancedSettings({ runId, open: event.currentTarget.open })}
+            >
+              <summary>Advanced settings</summary>
+              <div className="run-advanced-fields">
+                <div className="run-field-grid">
+                  <label>
+                    Task mode
+                    <select
+                      value={draft.task.mode}
+                      disabled={Boolean(visible.workspaces && visible.task?.evidenceFolder)}
+                      onChange={(event) =>
+                        edit((previous) => ({
+                          ...previous,
+                          task: {
+                            ...previous.task,
+                            mode: event.target.value === 'prototype' ? 'prototype' : 'reasoning',
+                            profile:
+                              event.target.value === 'prototype' ? 'build' : previous.task.profile,
+                          },
+                        }))
+                      }
+                    >
+                      <option value="reasoning">Reasoning and analysis</option>
+                      <option value="prototype">Competing prototypes</option>
+                    </select>
+                  </label>
+                  <label>
+                    Tool access
+                    <select
+                      value={draft.task.profile}
+                      disabled={
+                        draft.task.mode === 'prototype' ||
+                        Boolean(visible.workspaces && visible.task?.evidenceFolder)
+                      }
+                      onChange={(event) =>
+                        taskField('profile', event.target.value === 'build' ? 'build' : 'analysis')
+                      }
+                    >
+                      <option value="analysis">Read and search local files</option>
+                      <option value="build">Create files and run code</option>
+                    </select>
+                  </label>
+                </div>
+                <div>
+                  <label htmlFor={`${fieldPrefix}-artifact`}>Intended result</label>
+                  <Input
+                    id={`${fieldPrefix}-artifact`}
+                    maxLength={1000}
+                    value={draft.task.expectedArtifact}
+                    onChange={(event) => taskField('expectedArtifact', event.target.value)}
+                    placeholder="An answer, analysis, report, or working prototype"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={generatingCriteria || !draft.task.question.trim()}
+                    onClick={() => void generateCriteria()}
+                  >
+                    {generatingCriteria ? 'Generating criteria…' : 'Auto-generate criteria'}
+                  </Button>
+                  {criteriaSuggestion?.runId === runId && (
+                    <section aria-label="Suggested acceptance criteria">
+                      <p>Maestro suggested:</p>
+                      <ul>
+                        {criteriaSuggestion.criteria.map((criterion, index) => (
+                          <li key={`${index}-${criterion}`}>{criterion}</li>
+                        ))}
+                      </ul>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={
+                          criteriaSuggestion.task !== JSON.stringify(draft.task) ||
+                          criteriaSuggestion.revision !== draft.baseRevision
+                        }
+                        onClick={() => {
+                          taskField('criteria', criteriaSuggestion.criteria);
+                          setCriteriaSuggestion(undefined);
+                        }}
+                      >
+                        Use suggested criteria
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setCriteriaSuggestion(undefined)}
+                      >
+                        Discard suggestion
+                      </Button>
+                      {(criteriaSuggestion.task !== JSON.stringify(draft.task) ||
+                        criteriaSuggestion.revision !== draft.baseRevision) && (
+                        <p>The setup changed. Generate a new suggestion.</p>
+                      )}
+                    </section>
+                  )}
+                  <div className="run-field-grid">
+                    <label htmlFor={`${fieldPrefix}-criteria`}>
+                      Success criteria, one per line
+                      <Textarea
+                        id={`${fieldPrefix}-criteria`}
+                        className="resize-none"
+                        rows={3}
+                        maxLength={3000}
+                        value={draft.task.criteria.join('\n')}
+                        onChange={(event) => taskField('criteria', event.target.value.split('\n'))}
+                      />
+                    </label>
+                    <label htmlFor={`${fieldPrefix}-grounding`}>
+                      Shared notes and references
+                      <Textarea
+                        id={`${fieldPrefix}-grounding`}
+                        className="resize-none"
+                        rows={3}
+                        maxLength={4000}
+                        value={draft.task.grounding.join('\n')}
+                        onChange={(event) => taskField('grounding', event.target.value.split('\n'))}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div>
+                  <fieldset disabled={Boolean(visible.workspaces)}>
+                    <ScaffoldPicker
+                      value={draft.task.scaffold?.id ?? ''}
+                      onChange={(id) =>
+                        edit((previous) => ({
+                          ...previous,
+                          task: {
+                            ...previous.task,
+                            scaffold: id ? { id } : undefined,
+                            source: id ? null : previous.task.source,
+                          },
+                        }))
+                      }
+                    />
+                    {draft.task.scaffold && (
+                      <p className="run-muted">
+                        The selected template is pinned during preparation. Each seat receives its
+                        own project worktree.
+                      </p>
+                    )}
+                    <label htmlFor={`${fieldPrefix}-project-directory`}>
+                      Project destination, optional
+                    </label>
+                    <Input
+                      id={`${fieldPrefix}-project-directory`}
+                      value={draft.task.projectDirectory ?? ''}
+                      onChange={(event) =>
+                        taskField('projectDirectory', event.target.value || undefined)
+                      }
+                      placeholder="Choose a project folder"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setBrowsingProject(true)}
+                    >
+                      <FolderOpen aria-hidden="true" /> Browse project folders
+                    </Button>
+                    {browsingProject && (
+                      <RepositoryBrowser
+                        key={`project:${runId}`}
+                        onClose={() => setBrowsingProject(false)}
+                        onSelect={(path) => {
+                          taskField('projectDirectory', path);
+                          setBrowsingProject(false);
+                        }}
+                      />
+                    )}
+                    <p className="run-muted">
+                      Preparation initializes an empty folder as a Git project. Choose an existing
+                      Git repository or an empty folder. Completed results are saved separately in
+                      its managed folder.
+                    </p>
+                    <fieldset disabled={Boolean(draft.task.scaffold)}>
+                      <label htmlFor={`${fieldPrefix}-repository`}>
+                        Repository folder, optional
+                      </label>
+                      <Input
+                        id={`${fieldPrefix}-repository`}
+                        value={draft.task.source?.repository ?? ''}
+                        onChange={(event) =>
+                          taskField(
+                            'source',
+                            event.target.value
+                              ? {
+                                  repository: event.target.value,
+                                  revision: draft.task.source?.revision || 'HEAD',
+                                }
+                              : null,
+                          )
+                        }
+                        placeholder="Leave blank for separate scratch workspaces"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setBrowsingRepository(true)}
+                      >
+                        <FolderOpen aria-hidden="true" /> Browse folders
+                      </Button>
+                      {browsingRepository && (
+                        <RepositoryBrowser
+                          key={runId}
+                          onClose={() => setBrowsingRepository(false)}
+                          onSelect={(path) => {
+                            taskField('source', {
+                              repository: path,
+                              revision: draft.task.source?.revision || 'HEAD',
+                            });
+                            setBrowsingRepository(false);
+                          }}
+                        />
+                      )}
+                      {draft.task.source && (
+                        <label htmlFor={`${fieldPrefix}-revision`}>
+                          Source revision
+                          <Input
+                            id={`${fieldPrefix}-revision`}
+                            value={draft.task.source.revision}
+                            onChange={(event) =>
+                              taskField('source', {
+                                repository: draft.task.source?.repository ?? '',
+                                revision: event.target.value,
+                              })
+                            }
+                            placeholder="HEAD or an immutable commit"
+                          />
+                        </label>
+                      )}
+                      <p className="run-muted">
+                        Preparation records the exact commit. Uncommitted source changes are
+                        excluded.
+                      </p>
+                    </fieldset>
+                  </fieldset>
+                  <div className="run-field-grid">
+                    <label htmlFor={`${fieldPrefix}-handoffs`}>
+                      Automatic handoffs, 0–8
+                      <Input
+                        id={`${fieldPrefix}-handoffs`}
+                        type="number"
+                        min={0}
+                        max={8}
+                        value={draft.task.maxHandoffs}
+                        aria-invalid={draft.task.maxHandoffs < 0 || draft.task.maxHandoffs > 8}
+                        onChange={(event) => taskField('maxHandoffs', Number(event.target.value))}
+                      />
+                    </label>
+                    <label htmlFor={`${fieldPrefix}-seconds`}>
+                      Time limit in seconds, 30–3600
+                      <Input
+                        id={`${fieldPrefix}-seconds`}
+                        type="number"
+                        min={30}
+                        max={3600}
+                        value={draft.task.timeLimitSeconds}
+                        aria-invalid={
+                          draft.task.timeLimitSeconds < 30 || draft.task.timeLimitSeconds > 3600
+                        }
+                        onChange={(event) =>
+                          taskField('timeLimitSeconds', Number(event.target.value))
+                        }
+                      />
+                    </label>
+                  </div>
+                </div>
+                <section className="run-review" aria-label="Review setup">
+                  <h4>Review setup</h4>
+                  <p className="run-question">
+                    {draft.task.question || 'Add a question to continue.'}
+                  </p>
+                  <p>Result: {draft.task.expectedArtifact || 'Not specified'}</p>
+                  <p>
+                    Criteria:{' '}
+                    {draft.task.criteria.filter((item) => item.trim()).join('; ') || 'None yet'}
+                  </p>
+                  <p>
+                    Project destination:{' '}
+                    {draft.task.projectDirectory || 'Managed workspace storage'}
+                  </p>
+                  <p>
+                    Source:{' '}
+                    {draft.task.source
+                      ? `${draft.task.source.repository} at ${draft.task.source.revision}`
+                      : draft.task.scaffold
+                        ? `Scaffold ${draft.task.scaffold.id}`
+                        : draft.task.evidenceFolder || 'Independent scratch directories'}
+                  </p>
+                  <p>
+                    A: {draft.seats.a.model} · {draft.seats.a.effort}
+                    <br />
+                    B: {draft.seats.b.model} · {draft.seats.b.effort}
+                  </p>
+                  {visible.workspaces && (
+                    <p>
+                      A: {visible.workspaces.seats.a.root}
+                      <br />
+                      B: {visible.workspaces.seats.b.root}
+                    </p>
+                  )}
+                  <p className="run-muted">
+                    Preflight checks model availability, source or scaffold selection, and
+                    destination permissions. Preparation also verifies sandbox tools.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy || checkingPreflight || !draft.task.question.trim()}
+                    onClick={() => void checkPreflight()}
+                  >
+                    {checkingPreflight ? 'Checking…' : 'Check setup'}
+                  </Button>
+                  {currentPreflight && (
+                    <p className="run-muted">
+                      {preflightPassed ? 'Checks passed.' : 'Some checks need attention.'}
+                    </p>
+                  )}
+                  {currentPreflight && renderPreflightDetails(currentPreflight)}
+                </section>
+                <div className="run-buttons">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={save}
+                    disabled={busy || changedElsewhere || !draft.task.question.trim()}
+                  >
+                    Save draft
+                  </Button>
+                  {draft.dirty && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => {
+                        clearDraft(visible.runId);
+                        setEditor(cloneEditor(visible));
+                        setError(undefined);
+                      }}
+                    >
+                      Discard edits
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </details>
           </form>
         </details>
       )}
