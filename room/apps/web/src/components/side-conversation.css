@@ -104,22 +104,6 @@
   margin-bottom: 10px;
   flex-wrap: wrap;
 }
-.message-delivery label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  color: var(--muted-foreground);
-}
-.message-delivery select {
-  min-height: 36px;
-  max-width: 200px;
-  background: var(--card);
-  color: var(--foreground);
-  border: 1px solid var(--input);
-  padding: 6px 8px;
-  font: inherit;
-}
 .saved-messages {
   font-size: 11px;
   border-top: 1px solid var(--border);

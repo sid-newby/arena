@@ -1,28 +1,39 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './arena.css';
 import { Tabs } from 'radix-ui';
-import { ArrowLeft, ArrowRight, MoveUpRight, LocateFixed, RotateCcw, Square } from 'lucide-react';
 import { AgentPanel } from '@/components/agent-panel';
 import { Button } from '@/components/ui/button';
 import { HangoutMemory } from '@/components/hangout-memory';
 import { ThemeControls } from '@/components/theme-controls';
 import { MaestroDialog } from '@/components/maestro-dialog';
-import { SpeechControls } from '@/components/speech-controls';
+import { VoiceBand } from '@/components/voice-band';
 import { useAgents } from '@/hooks/use-agents';
 import { useSpeech } from '@/hooks/use-speech';
-import { agentIds, modelPanelName, panelistName, type AgentId, type Pose } from '@/lib/agents';
+import { useMicrophone } from '@/hooks/use-microphone';
+import type { VoiceTarget } from '@/lib/microphone';
+import { agentIds, api, modelPanelName, panelistName, type AgentId } from '@/lib/agents';
 import { assertSendScope, type DeliveryBatch } from '@/lib/run-scope';
 import { ExpressionLab } from '@/components/expression-lab';
 import type { ExpressionSnapshot } from '@/lib/panel-expression';
 import type { ActivityFrame } from '@/lib/panel-motion';
 import { messagePending, type MessageIntent } from '@/lib/messaging';
 
-function readEffectsEnabled() {
+function readPreference(key: string) {
   try {
-    return localStorage.getItem('lilbits-effects') !== 'off';
+    return localStorage.getItem(key) !== 'off';
   } catch {
     return true;
   }
+}
+function writePreference(key: string, enabled: boolean) {
+  try {
+    localStorage.setItem(key, enabled ? 'on' : 'off');
+  } catch {
+    /* The preference still applies for this visit. */
+  }
+}
+function userHasActivated() {
+  return navigator.userActivation?.hasBeenActive ?? false;
 }
 
 export default function App() {
@@ -33,18 +44,86 @@ export default function App() {
   const room = useAgents(debate ? 'debate' : 'hangout');
   const [preview, setPreview] = useState(false);
   const speech = useSpeech(room.agents, preview, room.runId);
+  const [voiceTarget, setVoiceTarget] = useState<VoiceTarget>('room');
+  const voiceQueue = useRef(Promise.resolve());
+  const microphone = useMicrophone(preview, {
+    onSpeech: () => {
+      if (speech.busy) speech.stop();
+    },
+    onTranscript: (text) => {
+      voiceQueue.current = voiceQueue.current
+        .then(() => deliverTranscript(text))
+        .catch((cause) =>
+          microphone.notify(
+            cause instanceof Error ? cause.message : 'Your words could not be delivered.',
+          ),
+        );
+    },
+  });
+  const [wanted, setWanted] = useState(() => ({
+    speech: readPreference('lilbits-speech'),
+    microphone: readPreference('lilbits-microphone'),
+  }));
+  const [activated, setActivated] = useState(userHasActivated);
+  useEffect(() => {
+    if (activated) return;
+    const arm = () => setActivated(true);
+    window.addEventListener('pointerdown', arm, { once: true, capture: true });
+    window.addEventListener('keydown', arm, { once: true, capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', arm, { capture: true });
+      window.removeEventListener('keydown', arm, { capture: true });
+    };
+  }, [activated]);
+  const autoStarted = useRef({ speech: false, microphone: false });
+  useEffect(() => {
+    if (!activated || preview) return;
+    if (
+      wanted.speech &&
+      !autoStarted.current.speech &&
+      speech.ready &&
+      speech.connectionsReady &&
+      !speech.enabled &&
+      !speech.starting
+    ) {
+      autoStarted.current.speech = true;
+      void speech.enable();
+    }
+    if (
+      wanted.microphone &&
+      !autoStarted.current.microphone &&
+      microphone.supported &&
+      microphone.ready &&
+      !microphone.enabled &&
+      !microphone.starting
+    ) {
+      autoStarted.current.microphone = true;
+      void microphone.enable();
+    }
+  }, [activated, preview, wanted, speech, microphone]);
+  function toggleSpeech() {
+    const enable = !speech.enabled;
+    setWanted((current) => ({ ...current, speech: enable }));
+    writePreference('lilbits-speech', enable);
+    if (enable) void speech.enable();
+    else speech.disable();
+  }
+  function toggleMicrophone() {
+    const enable = !microphone.enabled;
+    setWanted((current) => ({ ...current, microphone: enable }));
+    writePreference('lilbits-microphone', enable);
+    if (enable) void microphone.enable();
+    else microphone.disable();
+  }
   const [conversationAction, setConversationAction] = useState<
     { status: 'idle' | 'stopping' | 'stopped' } | { status: 'error'; message: string }
   >({ status: 'idle' });
-  const [effectsEnabled, setEffectsEnabled] = useState(readEffectsEnabled);
+  const [effectsEnabled, setEffectsEnabled] = useState(() => readPreference('lilbits-effects'));
   const [developmentExpressions, setDevelopmentExpressions] = useState<
     Partial<Record<AgentId, ExpressionSnapshot>>
   >({});
   const [developmentActivity, setDevelopmentActivity] = useState<
     Partial<Record<AgentId, ActivityFrame>>
-  >({});
-  const [poses, setPoses] = useState<
-    Partial<Record<AgentId, { pose: Pose | 'lean'; revision: number }>>
   >({});
   const [selected, setSelected] = useState('a');
   const [health, setHealth] = useState<string>();
@@ -76,7 +155,60 @@ export default function App() {
       speech.stop();
     await room.send(id, text, requestId, scope, intent);
   }
+  async function deliverTranscript(text: string) {
+    const runId = room.runId;
+    if (!runId) throw new Error('Wait for the room to connect before speaking.');
+    if (voiceTarget !== 'room') {
+      const side = room.agents[voiceTarget].side;
+      if (!side || side.runId !== runId)
+        throw new Error('The whisper is not ready yet. Open the whisper and try again.');
+      await api(
+        `/api/runs/${encodeURIComponent(runId)}/agents/${voiceTarget}/side-conversation`,
+        () => undefined,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: crypto.randomUUID(),
+            text,
+            expectedRevision: side.revision,
+          }),
+          signal: AbortSignal.timeout(30000),
+        },
+      );
+      return;
+    }
+    const targets = debate
+      ? [...agentIds]
+      : agentIds.filter((id) => room.agents[id].snapshot.hangoutPresence?.present === true);
+    if (!targets.length) throw new Error('No one is present to hear you.');
+    const revision = room.agents[targets[0]].snapshot.revision;
+    if (room.agents[targets[0]].snapshot.runId !== runId || revision === undefined)
+      throw new Error('Wait for the room to connect before speaking.');
+    const batch = {
+      runId,
+      revision,
+      text,
+      targets,
+      requestId: crypto.randomUUID(),
+      intent: 'interrupt' as const,
+      delivered: new Set<AgentId>(),
+    };
+    const results = await Promise.allSettled(
+      targets.map((target) =>
+        send(target, text, `${batch.requestId}-${target}`, batch, 'interrupt'),
+      ),
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failure)
+      throw failure.reason instanceof Error
+        ? failure.reason
+        : new Error('Message could not be sent.');
+  }
   async function stopConversation() {
+    microphone.notify(undefined);
     speech.stop();
     setConversationAction({ status: 'stopping' });
     try {
@@ -150,11 +282,7 @@ export default function App() {
             onClick={() => {
               const enabled = !effectsEnabled;
               setEffectsEnabled(enabled);
-              try {
-                localStorage.setItem('lilbits-effects', enabled ? 'on' : 'off');
-              } catch {
-                /* The preference still applies for this visit. */
-              }
+              writePreference('lilbits-effects', enabled);
             }}
           >
             Effects {effectsEnabled ? 'on' : 'off'}
@@ -190,114 +318,35 @@ export default function App() {
                 selected={selected === id}
                 developmentExpression={developmentExpressions[id]}
                 developmentActivity={developmentActivity[id]}
-                pose={
-                  poses[id]?.revision === room.agents[id].snapshot.poseRevision
-                    ? poses[id]?.pose
-                    : undefined
-                }
+                pose={undefined}
               />
             </Tabs.Content>
           ))}
         </main>
       </Tabs.Root>
-      <footer className="room-footer" data-selected={selected}>
-        <div className="scene-controls">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() =>
-              setPoses({
-                a: { pose: 'front', revision: room.agents.a.snapshot.poseRevision },
-                b: { pose: 'front', revision: room.agents.b.snapshot.poseRevision },
-              })
-            }
-          >
-            <LocateFixed />
-            Recenter panels
-          </Button>
-          {agentIds.map((id) => (
-            <fieldset key={id} className={`pose-control pose-${id}`}>
-              <legend>{id === 'a' ? 'A' : 'B'}</legend>
-              <div>
-                {(['front', id === 'a' ? 'right' : 'left', 'lean'] as const).map((pose) => (
-                  <Button
-                    key={pose}
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`${id === 'a' ? 'A' : 'B'}: ${pose === 'front' ? 'face audience' : pose === 'lean' ? 'lean in' : 'face peer'}`}
-                    aria-pressed={
-                      poses[id]?.pose === pose &&
-                      poses[id]?.revision === room.agents[id].snapshot.poseRevision
-                    }
-                    onClick={() =>
-                      setPoses((current) => ({
-                        ...current,
-                        [id]: { pose, revision: room.agents[id].snapshot.poseRevision },
-                      }))
-                    }
-                  >
-                    {pose === 'lean' ? (
-                      <MoveUpRight />
-                    ) : pose === 'left' ? (
-                      <ArrowLeft />
-                    ) : pose === 'right' ? (
-                      <ArrowRight />
-                    ) : (
-                      <MoveUpRight className="front-pose-icon" />
-                    )}
-                    <span>
-                      {pose === 'front' ? 'Audience' : pose === 'lean' ? 'Lean in' : 'Peer'}
-                    </span>
-                  </Button>
-                ))}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Reset ${id} pose`}
-                  onClick={() => setPoses((current) => ({ ...current, [id]: undefined }))}
-                >
-                  <RotateCcw />
-                </Button>
-              </div>
-            </fieldset>
-          ))}
-        </div>
-        <div className="room-utility">
-          <SpeechControls speech={speech} preview={preview} hangout={!debate} />
-          <div className="conversation-controls">
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={preview || !conversationActive || conversationAction.status === 'stopping'}
-              aria-busy={conversationAction.status === 'stopping'}
-              onClick={() => void stopConversation()}
-            >
-              <Square />
-              {conversationAction.status === 'stopping'
-                ? 'Stopping conversation…'
-                : 'Stop conversation'}
-            </Button>
-            <output
-              className="conversation-feedback"
-              aria-live="polite"
-              data-error={conversationAction.status === 'error' || undefined}
-            >
-              {conversationAction.status === 'error'
-                ? conversationAction.message
-                : conversationAction.status === 'stopped' && !conversationActive
-                  ? 'Conversation stopped'
-                  : ''}
-            </output>
-          </div>
-          <Button size="sm" variant="ghost" onClick={() => void ping()} disabled={pinging}>
-            {pinging ? 'Checking…' : health || 'Ping API'}
-          </Button>
-          {(room.apiError || reconnecting) && (
-            <Button size="sm" variant="ghost" onClick={room.reconnect}>
-              Reconnect
-            </Button>
-          )}
-        </div>
+      <footer className="room-footer">
+        <VoiceBand
+          speech={speech}
+          microphone={microphone}
+          preview={preview}
+          hangout={!debate}
+          names={{
+            a: modelPanelName(room.agents.a.info?.model, 'a'),
+            b: modelPanelName(room.agents.b.info?.model, 'b'),
+          }}
+          target={voiceTarget}
+          setTarget={setVoiceTarget}
+          awaitingActivation={!activated && (wanted.speech || wanted.microphone)}
+          toggleSpeech={toggleSpeech}
+          toggleMicrophone={toggleMicrophone}
+          conversation={conversationAction}
+          conversationActive={conversationActive}
+          stopConversation={() => void stopConversation()}
+          health={health}
+          pinging={pinging}
+          ping={() => void ping()}
+          reconnect={room.apiError || reconnecting ? room.reconnect : undefined}
+        />
       </footer>
       {import.meta.env.DEV && new URLSearchParams(location.search).has('effects') && (
         <ExpressionLab

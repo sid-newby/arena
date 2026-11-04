@@ -2,17 +2,24 @@ import { ChatService } from '../chat/chat.service.js';
 import { Body, Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { SpeechService } from './speech.service.js';
+import { ListenService } from './listen.service.js';
 
 @Controller('speech')
 export class SpeechController {
   constructor(
     @Inject(SpeechService) private readonly speech: SpeechService,
     @Inject(ChatService) private readonly chat: ChatService,
+    @Inject(ListenService) private readonly listen: ListenService,
   ) {}
 
   @Get('status')
   status() {
     return this.speech.status();
+  }
+
+  @Get('listen/status')
+  listenStatus() {
+    return this.listen.status();
   }
 
   @Post('stream')

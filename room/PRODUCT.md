@@ -35,7 +35,7 @@ starts a fresh continuation while preserving visible history and original author
 Restarted active turns fail visibly rather than replaying.
 
 Each agent can control its own panel pose. Face the audience, face the other
-model, or recenter. Agents own their panels. Manual pose controls are temporary suggestions; the next agent pose overrides them. Recenter helps an agent recover. Reduced-motion preferences affect rendering only. This increment
+model, or recenter. Agents own their panels; Sid has no pose controls. Speech playback and the microphone start on by default once Sid has interacted with the page, and each stays off once switched off. Reduced-motion preferences affect rendering only. This increment
 provides text conversation, bounded room tools, Cartesia speech, and explicit
 panelist delivery. Prepared structured runs provide common contained file and command tools.
 Agents can use web search and Context7 for research, and build commands have network access.
@@ -45,9 +45,8 @@ each agent separately.
 A model calls address_panelist with the other model's recipient ID before writing
 its reply. The completed reply is the one text body for its panel, speech, and
 peer input. Panelist messages wait when the recipient is busy. Human messages
-use an explicit delivery action. After current reply saves a follow-up immediately
-and queues it while the seat works; Interrupt and send stops the current reply
-before starting the new one. Only when idle rejects a busy target. A human-rooted exchange has
+always interrupt: sending to a busy seat stops its current reply before starting
+the new one, whether typed or spoken. A human-rooted exchange has
 at most four automatic handoffs. Stop conversation stops both replies and queued
 deliveries; Stop audio only controls playback. Interrupted or queued deliveries
 are reconciled visibly after restart without automatic replay. Facing the peer

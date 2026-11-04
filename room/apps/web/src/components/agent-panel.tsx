@@ -202,7 +202,7 @@ export function AgentPanel({
     : {};
   const [draft, setDraft] = useState('');
   const input = useRef<HTMLTextAreaElement>(null);
-  const [intent, setIntent] = useState<MessageIntent>('queue');
+  const intent: MessageIntent = 'interrupt';
   const [cancelling, setCancelling] = useState<string>();
   const [debateDestination, setDestination] = useState<'self' | 'both'>('self');
   const destination = hangout ? 'both' : debateDestination;
@@ -253,7 +253,6 @@ export function AgentPanel({
   const targetAvailable = (target: AgentId) =>
     agents[target].info?.status === 'ready' &&
     agents[target].connection === 'connected' &&
-    (intent !== 'send' || agents[target].snapshot.status !== 'working') &&
     !agents[target].pending;
   const available =
     Boolean(scope) && presenceReady && targets.length > 0 && waitingTargets.every(targetAvailable);
@@ -265,12 +264,7 @@ export function AgentPanel({
   const visibleReceipts = receipts.filter(
     (message) => messagePending(message) || receipts.slice(-3).includes(message),
   );
-  const sendLabel =
-    intent === 'interrupt'
-      ? 'Interrupt and send'
-      : intent === 'queue' && busyTargets
-        ? 'Queue message'
-        : 'Send';
+  const sendLabel = busyTargets ? 'Interrupt and send' : 'Send';
   const lastReply = snapshot.messages.at(-1);
   const activity: ActivityFrame = developmentActivity ?? {
     connected: !preview && agent.connection === 'connected',
@@ -595,23 +589,6 @@ export function AgentPanel({
               </p>
             )}
             <div className="message-delivery">
-              <label htmlFor={`delivery-${id}`}>
-                Delivery
-                <select
-                  id={`delivery-${id}`}
-                  value={intent}
-                  disabled={preview || submitting}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (value === 'send' || value === 'queue' || value === 'interrupt')
-                      setIntent(value);
-                  }}
-                >
-                  <option value="queue">After current reply</option>
-                  <option value="interrupt">Interrupt and send</option>
-                  <option value="send">Only when idle</option>
-                </select>
-              </label>
               <SideConversation
                 runId={runId}
                 seat={id}
@@ -768,21 +745,19 @@ export function AgentPanel({
             </form>
             <div className="composer-caption">
               <span>
-                {intent === 'interrupt'
+                {busyTargets
                   ? 'Stops the current reply before starting your message.'
-                  : intent === 'queue' && busyTargets
-                    ? 'Saved immediately. Starts after the current reply.'
-                    : destination === 'both'
-                      ? hangout
-                        ? !presenceReady
-                          ? 'Checking who is here…'
-                          : targets.length === 0
-                            ? 'The room is empty. Invite someone back to chat.'
-                            : targets.length === 1
-                              ? `Room message · ${modelPanelName(agents[targets[0]].info?.model, targets[0])} is here.`
-                              : 'Sid, Astra, and Fable share this conversation.'
-                        : 'One message. Two independent replies.'
-                      : 'Your prompt goes to the selected agent.'}
+                  : destination === 'both'
+                    ? hangout
+                      ? !presenceReady
+                        ? 'Checking who is here…'
+                        : targets.length === 0
+                          ? 'The room is empty. Invite someone back to chat.'
+                          : targets.length === 1
+                            ? `Room message · ${modelPanelName(agents[targets[0]].info?.model, targets[0])} is here.`
+                            : 'Sid, Astra, and Fable share this conversation.'
+                      : 'One message. Two independent replies.'
+                    : 'Your prompt goes to the selected agent.'}
               </span>
               <span>↵ send</span>
             </div>

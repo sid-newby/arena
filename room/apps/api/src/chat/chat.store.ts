@@ -446,7 +446,7 @@ export class ChatStore {
       ORDER BY seq DESC LIMIT 4
     `)
       .all(turn.run_id, turn.agent, turn.id, turn.run_id, turn.agent === 'a' ? 'b' : 'a');
-    if (!remarks.length) return turn.prompt;
+    if (!remarks.length) return `Sid’s current message:\n${turn.prompt}`;
     const quotes = remarks.toReversed().map(({ model, quote }) => {
       const characters = Array.from(String(quote));
       return {
@@ -576,7 +576,9 @@ ${turn.prompt}`;
       const binding = this.runs.binding(this.currentRunId(), current.recipient);
       const prompt = panelistPrompt({
         sender: current.sender,
+        senderName: modelName(this.runs.binding(this.currentRunId(), current.sender).config.model),
         recipient: current.recipient,
+        recipientName: modelName(binding.config.model),
         sourceTurnId: current.source_turn_id,
         text: current.text,
       });

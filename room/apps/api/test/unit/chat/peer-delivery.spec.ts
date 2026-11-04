@@ -57,7 +57,9 @@ describe('Panelist delivery ledger', () => {
     const target = store.claimDelivery(delivery)!;
     expect(JSON.parse(target.prompt.slice(target.prompt.indexOf('\n') + 1))).toEqual({
       sender: 'a',
+      senderName: expect.any(String),
       recipient: 'b',
+      recipientName: expect.any(String),
       sourceTurnId: 'source',
       text,
     });
@@ -231,12 +233,20 @@ describe('Panelist scheduling', () => {
     expect(await service.submit(sender, input)).toEqual(first);
     await vi.advanceTimersByTimeAsync(500);
     expect(calls).toHaveLength(1);
+    const names = { a: 'Luna', b: 'Opus' } as const;
     expect(peerInput(calls[0])).toEqual({
       sender,
+      senderName: names[sender],
       recipient,
+      recipientName: names[recipient],
       sourceTurnId: first.turnId,
       text: 'Exact message ☃.',
     });
+    expect(
+      calls[0].text.startsWith(
+        `Room delivery from ${names[sender]} in seat ${sender.toUpperCase()}, addressed to you, ${names[recipient]} in seat ${recipient.toUpperCase()}.`,
+      ),
+    ).toBe(true);
     expect(service.snapshot(sender).messages.at(-1)?.delivery?.status).toBe('completed');
     expect(service.snapshot(recipient).messages.at(-1)).toMatchObject({
       fromPanelist: sender,

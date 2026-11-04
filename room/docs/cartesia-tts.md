@@ -1,9 +1,10 @@
 # Cartesia speech in arena
 
-TTS only. Luna and Opus share one server-side Cartesia WebSocket with isolated
-contexts. A room playback queue schedules incoming 44.1kHz float32 PCM chunks
-through Web Audio. It plays one speaker at a time; synthesis contexts can be
-independent. No microphone or STT path is installed.
+Two directions. Replies are spoken with Sonic text-to-speech: the seats share one
+server-side Cartesia WebSocket with isolated contexts, and a room playback queue
+schedules incoming 44.1kHz float32 PCM chunks through Web Audio, one speaker at
+a time. Sid's voice is transcribed with Ink speech-to-text over a second
+server-side WebSocket; see [Listening](#listening) below.
 
 Speech starts off when the page loads. Enable speech explicitly to send narration
 for completed replies to Cartesia. The choice stays on across run changes and
@@ -107,3 +108,55 @@ second watcher or terminate unrelated services. Frontend remains on58241.
   Fixed sample playback was subsequently separated from automatic reply speech.
 - No agent/model prompts were sent by this task; existing concurrent turns were
   left alone. No additional live synthesis retries were made.
+
+## Listening
+
+The room listens hands-free. **Enable microphone** asks for the microphone once,
+then streams audio continuously while it stays on. There is no push-to-talk.
+Cartesia's `ink-2` turn-detection model decides when Sid starts and stops
+talking and returns one transcript per turn.
+
+```mermaid
+flowchart LR
+  Mic[Microphone] -->|AudioWorklet · 16kHz pcm_s16le · 100ms frames| Web[Browser]
+  Web -->|ws /api/speech/listen| API[Nest API]
+  API -->|wss stt/turns/websocket · Bearer header| Cartesia[Cartesia Ink]
+  Cartesia -->|turn.start · turn.update · turn.end| API --> Web
+  Web -->|turn.end transcript| Seats[Room message or whisper]
+```
+
+| Piece | Where | What it does |
+| --- | --- | --- |
+| `lib/microphone.ts` | web | Resampling, 16-bit conversion, 100 ms chunking, event parsing, the inline worklet source |
+| `hooks/use-microphone.ts` | web | Permission, Web Audio capture, the room socket, reconnects with backoff, barge-in |
+| `components/microphone-controls.tsx` | web | Enable/disable, the **Everyone / Whisper** target, live captions |
+| `speech/listen.service.ts` | api | Opens the Cartesia turn socket with the server-held key and relays events |
+| `speech/listen.gateway.ts` | api | Accepts the browser WebSocket at `/api/speech/listen` with the local-origin check |
+
+Each completed turn is delivered through the normal message path with the
+interrupt intent, like a typed message. With **Everyone** selected it goes to every
+present seat as Sid's message. With **Whisper Astra** or **Whisper Fable**
+selected it goes to that seat's private side conversation, which is never
+spoken aloud. If a reply is playing when Sid starts talking, playback stops
+so the seats do not talk over him.
+
+The server caps audio frames at 64 KB, allows two microphones at once, and
+tells the browser when Cartesia closes the turn socket so it can reconnect.
+`GET /api/speech/listen/status` reports whether the server holds a key. The
+key never reaches the browser; the API's CJS SDK path sends it as a Bearer
+header, and `cartesia.listen.connection.spec.ts` asserts the URL carries only
+`model`, `encoding`, and `sample_rate`.
+
+Vite proxies the WebSocket in development (`ws: true` on the `/api` proxy).
+`turn.update` transcripts are cumulative within a turn and are shown as live
+captions; only `turn.end` text is sent.
+
+## Who is speaking
+
+Every message a seat receives names its author. Sid's room messages arrive
+under a `Sid’s current message:` heading, with the latest public remarks quoted
+by speaker name. A reply addressed to the other seat arrives as a room delivery
+that names the sender and recipient by model name and seat, and the attached
+JSON carries `senderName` and `recipientName` alongside the seat IDs. The
+heading is part of the prompt, not the reply, so it is never narrated.
+

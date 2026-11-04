@@ -129,7 +129,7 @@ describe('Durable seat messages', () => {
     await settle();
     broadcast('b', 'Anything else?', 'public-followup-later');
     await settle();
-    expect(runs[5].context.text).toBe('Anything else?');
+    expect(runs[5].context.text).toBe('Sid’s current message:\nAnything else?');
   });
   it('lets a participant go quiet, leave until invited, and return with the same voice preference', async () => {
     const hangout = chat.hangout();

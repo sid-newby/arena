@@ -7,6 +7,7 @@ import { Module } from '@nestjs/common';
 import { HealthController } from './health/health.controller.js';
 import { SpeechController } from './speech/speech.controller.js';
 import { SpeechService } from './speech/speech.service.js';
+import { ListenService } from './speech/listen.service.js';
 import { MaestroController } from './maestro/maestro.controller.js';
 import { MaestroService, MAESTRO_RUN_TOOLS } from './maestro/maestro.service.js';
 import { DebateService } from './debate/debate.service.js';
@@ -40,6 +41,7 @@ import { PreflightController } from './preflight/preflight.controller.js';
     },
     ChatService,
     SpeechService,
+    ListenService,
     DebateService,
     {
       provide: MAESTRO_RUN_TOOLS,

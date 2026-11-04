@@ -30,7 +30,7 @@ export function assertAnthropicSubscription(account: AccountInfo) {
   const apiKeySource = account.apiKeySource?.toLowerCase();
   const oauth = /oauth|claude[._-]?ai|subscription/.test(source);
   const subscription =
-    !source && /\b(pro|max|team|enterprise)\b/i.test(account.subscriptionType ?? '');
+    !source && /\b(pro|max|ultra|team|enterprise)\b/i.test(account.subscriptionType ?? '');
   if (
     account.apiProvider !== 'firstParty' ||
     (!oauth && !subscription) ||

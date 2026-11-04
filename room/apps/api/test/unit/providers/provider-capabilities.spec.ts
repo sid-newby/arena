@@ -130,24 +130,27 @@ it('rejects Claude cloud routing before model discovery', async () => {
   expect(close).toHaveBeenCalledOnce();
 });
 
-it('recognizes the installed SDK subscription metadata when token-source fields are absent', async () => {
-  fake.query.mockReturnValue({
-    close: vi.fn<() => void>(),
-    accountInfo: async () => ({ apiProvider: 'firstParty', subscriptionType: 'Claude Max' }),
-    supportedModels: async () => [
-      {
-        value: 'opus',
-        resolvedModel: 'claude-opus-5-5',
-        displayName: 'Opus',
-        supportedEffortLevels: ['high'],
-      },
-    ],
-  });
-  expect(await discoverModels('anthropic')).toMatchObject({
-    status: 'ready',
-    models: [{ id: 'claude-opus-5-5' }],
-  });
-});
+it.each(['Claude Max', 'Claude Ultra'])(
+  'recognizes the installed SDK subscription metadata %s when token-source fields are absent',
+  async (subscriptionType) => {
+    fake.query.mockReturnValue({
+      close: vi.fn<() => void>(),
+      accountInfo: async () => ({ apiProvider: 'firstParty', subscriptionType }),
+      supportedModels: async () => [
+        {
+          value: 'opus',
+          resolvedModel: 'claude-opus-5-5',
+          displayName: 'Opus',
+          supportedEffortLevels: ['high'],
+        },
+      ],
+    });
+    expect(await discoverModels('anthropic')).toMatchObject({
+      status: 'ready',
+      models: [{ id: 'claude-opus-5-5' }],
+    });
+  },
+);
 
 it('does not treat a plan label as permission to use an explicit API-key route', async () => {
   const supportedModels = vi.fn<() => Promise<unknown[]>>(async () => []);

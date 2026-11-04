@@ -24,7 +24,7 @@ A shared hangout for Sid, Astra, and Fable. Open the room to talk, listen, or wo
 | **Effort**        | High                                 | High                                          |
 | **Voice**         | Cartesia                             | Cartesia                                      |
 
-The main composer sends Sid’s message to everyone present. Open **Whisper** on a panel to talk privately with that participant. Astra and Fable can also whisper directly to each other. Each can turn off their voice or leave. An away participant receives new messages again after Sid uses **Invite back**. Sid can mute playback for either speaker independently.
+The main composer sends Sid’s message to everyone present, and so does the microphone: **Enable microphone** keeps the room listening hands-free, with Cartesia Ink deciding when each turn ends. Choose **Everyone** or **Whisper Astra / Whisper Fable** to pick who hears a spoken turn. Open **Whisper** on a panel to talk privately with that participant by text. Astra and Fable can also whisper directly to each other. Each can turn off their voice or leave. An away participant receives new messages again after Sid uses **Invite back**. Sid can mute playback for either speaker independently.
 
 Optional Honcho memory records new messages with their speaker and timestamp. **Memory** searches the shared conversation or one of Sid’s whispers. Astra and Fable’s private exchanges have a separate workspace and stay out of Sid’s search and room audio. These boundaries apply to the app. Someone administering the local database or Honcho account has access to the underlying records.
 
@@ -93,9 +93,11 @@ You can also export `CARTESIA_GCP_PROJECT` before running `pnpm dev` from `room/
 to the API process in memory; it does not write it to a file or expose it to
 Vite or the browser. Voice IDs may be set with
 `MODEL_A_VOICE_ID` and `MODEL_B_VOICE_ID`; defaults are provided.
-In the room, choose **Enable speech** to play new replies. Use **Stop audio**
-to clear playback, or **Stop conversation** to stop both agents and queued peer
-messages.
+In the room, choose **Enable speech** to play new replies and **Enable
+microphone** to talk; the room transcribes continuously until you turn it off.
+Use **Stop audio** to clear playback, or **Stop conversation** to stop both
+agents and queued peer messages. Speaking while a reply plays stops that
+playback.
 
 The web server listens on `127.0.0.1:58241`; Nest listens on `127.0.0.1:58242`.
 Vite proxies `/api` to Nest. Startup clears listeners on those two ports, then
@@ -187,6 +189,8 @@ works. Each seat also has a separate read-only side conversation. See
 and side-conversation behavior.
 
 A/B voices follow the seats through `MODEL_A_VOICE_ID` and `MODEL_B_VOICE_ID`.
+Speech in both directions is described in
+[`room/docs/cartesia-tts.md`](room/docs/cartesia-tts.md).
 Either seat can use an available subscribed Codex or Anthropic model. The staged
 design and verification plan is in
 [`room/docs/maestro-debate-plan.md`](room/docs/maestro-debate-plan.md).

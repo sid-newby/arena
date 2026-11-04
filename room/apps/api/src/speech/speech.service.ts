@@ -21,6 +21,9 @@ const { TTSWS } = sdkRequire(
 // Capture once at module load, then remove from env before agent child processes start.
 const serverKey = process.env.CARTESIA_API_KEY?.trim();
 delete process.env.CARTESIA_API_KEY;
+export function serverCartesiaKey(): string | undefined {
+  return serverKey;
+}
 
 export const SPEECH_MODEL = 'sonic-3.6';
 export const SPEECH_RATE = 44100;

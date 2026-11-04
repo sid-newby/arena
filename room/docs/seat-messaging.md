@@ -1,15 +1,12 @@
 # Messaging seats while they work
 
-The main composer stays available while a seat works. Its Delivery control
-determines what happens when you send.
+The main composer stays available while a seat works. Every send, typed or
+spoken, uses the `interrupt` intent: the message is saved, the active reply is
+stopped, and the replacement starts after cancellation is acknowledged. An idle
+seat simply starts it. The API still accepts `queue` and `send` intents for
+other clients; the room no longer offers them.
 
-| Delivery | Behavior |
-| --- | --- |
-| After current reply | Saves the message immediately. An idle seat starts it; a busy seat queues it. |
-| Interrupt and send | Saves the message, stops the active reply, then starts the replacement after cancellation is acknowledged. |
-| Only when idle | Sends only if the seat has no active or pending main work. |
-
-The default is After current reply. Both sends save an independent receipt for
+Both sends save an independent receipt for
 each seat. If one destination fails, Retry preserves the original intent and
 request ID and sends only to destinations that did not acknowledge the request.
 Changing the text, destination, or delivery action creates a new request.

@@ -196,9 +196,9 @@ The large condensed signs give each terminal a recognizable presence; quieter bo
 
 The room fills `100svh` with a desktop minimum height of 620px. A 76px header sits above a flexible two-column stage; each column is `minmax(0, 1fr)`. The stage gap is `clamp(34px, 4.3vw, 78px)` and default padding is `12px 54px 30px 34px`. At 1600px and above, outer gutters grow to keep the room composed on wide screens.
 
-Each slab is a vertical flex container: large identity header, independently scrolling reply area, anchored composer. Header, replies and composer share the fluid panel inset recorded in the frontmatter. Replies use a 34px gap; controls use tighter spacing. The footer holds recentering and utility controls.
+Each slab is a vertical flex container: large identity header, independently scrolling reply area, anchored composer. Header, replies and composer share the fluid panel inset recorded in the frontmatter. Replies use a 34px gap; controls use tighter spacing. The footer is one voice band: speech and microphone toggles, the Everyone / seat target, Stop audio and Stop conversation, a single truncating status line, and a More disclosure for mute, voice tests, ping and reconnect. Panel poses belong to the agents; there are no manual pose controls.
 
-At 1000px and below, header and panel gutters tighten and secondary header/footer copy disappears. At 700px and below, accessible Luna/Opus tabs select one full-width panel, the room minimum becomes 560px, the header becomes 62px and manual pose controls are hidden. This is a tabbed mobile surface, not stacked simultaneous chat panels. Short desktop viewports at 760px height or below also compress headers and composers. The theme drawer is `min(490px, 100%)` wide; at 480px and below its font controls become one column.
+At 1000px and below, header and panel gutters tighten and secondary header/footer copy disappears. At 700px and below, accessible Luna/Opus tabs select one full-width panel, the room minimum becomes 560px, the header becomes 62px and the voice band wraps with the status on its own line. This is a tabbed mobile surface, not stacked simultaneous chat panels. Short desktop viewports at 760px height or below also compress headers and composers. The theme drawer is `min(490px, 100%)` wide; at 480px and below its font controls become one column.
 
 ## Elevation & Depth
 
@@ -212,7 +212,7 @@ Depth is structural: a 20px side face, skewed by 35 degrees, makes the slab thic
 
 **The Lacquer Rule.** Build depth from the slab face, side face, fine reflected light and a diffuse cast shadow. Preserve the black lacquer default.
 
-Panel pose transitions use 650ms and `cubic-bezier(0.16, 1, 0.3, 1)`, with desktop yaw bounded to ±2.7 degrees and mobile yaw to ±1.5 degrees. The stage perspective is 1800px on desktop and 1600px on mobile. Audience, peer and center are semantic agent actions. Human controls suggest a pose until the next agent pose call, including a repeated call. Reduced motion removes panel rotation and collapses transitions/animations to 0.01ms.
+Panel pose transitions use 650ms and `cubic-bezier(0.16, 1, 0.3, 1)`, with desktop yaw bounded to ±2.7 degrees and mobile yaw to ±1.5 degrees. The stage perspective is 1800px on desktop and 1600px on mobile. Audience, peer and center are semantic agent actions invoked only by the agents. Reduced motion removes panel rotation and collapses transitions/animations to 0.01ms.
 
 ## Shapes
 
@@ -261,7 +261,6 @@ Replies use the ghost Bubble inside Message and Message Scroller. The content is
 - Do keep provider identities distinct and corners square across themes.
 - Do retain independent reply scrolling and anchored composers.
 - Do show connection, failure, preview and working states truthfully.
-- Do let every subsequent agent pose call supersede a human suggestion, even when the requested pose repeats.
 - Do keep keyboard focus visible and render reduced-motion panels front-facing.
 
 ### Don't:
@@ -271,7 +270,7 @@ Replies use the ghost Bubble inside Message and Message Scroller. The content is
 - Don’t turn reflections into raster backgrounds or obscure text with them.
 - Don’t use condensed display typography for conversation paragraphs.
 - Don’t show human prompts as visible reply bubbles or imply Both connects the agents to each other.
-- Don’t turn a manual pose suggestion into a persistent lock or present future voice as working.
+- Don’t add human pose controls; poses are the agents’ expressions.
 
 ## CSS 3D arena poses (Sid-approved increment)
 
@@ -306,9 +305,8 @@ A nonzero panelist inbox count appears in the receiving panel's metadata.
 The footer's square ghost Stop conversation action stops both model replies,
 queued main and side messages, and local audio. It shows pending, success, and error feedback.
 Stop audio remains a separate playback action. The composer retains Send during
-all active replies. A native Delivery select offers After current reply,
-Interrupt and send, and Only when idle. The default queues work while a seat is
-busy; the button and caption state when it will queue or interrupt. A bounded
+all active replies. Every send interrupts: a busy seat stops its current reply
+and starts the new message, and the caption says so. A bounded
 receipt disclosure shows pending and recent messages, their authoritative delivery
 state, and cancellation for queued or unconfirmed work. Preview never sends or
 stops live conversation.
