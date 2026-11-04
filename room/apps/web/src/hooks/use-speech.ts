@@ -18,6 +18,11 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
   const [ready, setReady] = useState(false);
   const [detail, setDetail] = useState('Checking Cartesia setup…');
   const [enabled, setEnabled] = useState(false);
+  const [muted, setMuted] = useState<Record<Speaker, boolean>>({ a: false, b: false });
+  function toggleMute(agent: Speaker) {
+    if (!muted[agent]) queue.current?.silence(agent);
+    setMuted((value) => ({ ...value, [agent]: !value[agent] }));
+  }
   const [starting, setStarting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -148,6 +153,11 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
     }
     for (const agent of agentIds) {
       try {
+        if (muted[agent] || agents[agent].snapshot.hangoutPresence?.voiceEnabled === false) {
+          queue.current?.silence(agent);
+          tracker.current.baseline(agent, agents[agent].snapshot.messages);
+          continue;
+        }
         const segments = tracker.current.collect(agent, agents[agent].snapshot.messages);
         const notice = tracker.current.takeNotice();
         if (notice) setError(notice);
@@ -157,7 +167,18 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
         disable();
       }
     }
-  }, [agents, enabled, preview, connectionsReady, disable, stop, baseline, cancelPlayback, runId]);
+  }, [
+    agents,
+    enabled,
+    preview,
+    connectionsReady,
+    disable,
+    stop,
+    baseline,
+    cancelPlayback,
+    runId,
+    muted,
+  ]);
   /* oxlint-enable react/set-state-in-effect */
   async function prepare() {
     const operation = {};
@@ -208,7 +229,16 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
     }
   }
   async function test(agent: Speaker) {
-    if (!ready || starting || busy || testingRef.current || queue.current?.isBusy || preview)
+    if (
+      !ready ||
+      muted[agent] ||
+      agents[agent].snapshot.hangoutPresence?.voiceEnabled === false ||
+      starting ||
+      busy ||
+      testingRef.current ||
+      queue.current?.isBusy ||
+      preview
+    )
       return;
     testingRef.current = true;
     setTesting(true);
@@ -245,6 +275,12 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
     connectionsReady,
     enable,
     disable,
+    muted,
+    voiceEnabled: {
+      a: agents.a.snapshot.hangoutPresence?.voiceEnabled !== false,
+      b: agents.b.snapshot.hangoutPresence?.voiceEnabled !== false,
+    },
+    toggleMute,
     stop,
     test,
   };

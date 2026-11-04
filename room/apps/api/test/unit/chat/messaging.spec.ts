@@ -73,6 +73,139 @@ describe('Durable seat messages', () => {
       },
     );
   });
+  it('passes only fresh completed public peer remarks into the next Sid turn without waking the other seat', async () => {
+    const room = chat.hangout();
+    const broadcast = (seat: 'a' | 'b', text: string, id: string) =>
+      chat.submitMessage(
+        seat,
+        {
+          text,
+          broadcastId: id,
+          requestId: id + '-' + seat,
+          expectedRevision: room.revision,
+          intent: 'queue',
+        },
+        room.id,
+      );
+    broadcast('a', 'Which finish would you pick?', 'public-first');
+    broadcast('b', 'Which finish would you pick?', 'public-first');
+    await settle();
+    expect(runs).toHaveLength(2);
+    runs[0].context.append('A matte orange finish.');
+    runs[1].context.append('My own answer.');
+    runs[0].release();
+    runs[1].release();
+    await settle();
+
+    chat.submitSide(room.id, 'a', {
+      requestId: 'private-side-note',
+      text: 'Private design question.',
+      expectedRevision: room.revision,
+    });
+    await settle();
+    runs[2].context.append('A private answer.');
+    runs[2].release();
+    await settle();
+    // A stopped main turn can have text on screen, but it is not a completed remark.
+    broadcast('a', 'One last thought?', 'public-stopped');
+    await settle();
+    runs[3].context.append('Abandoned partial.');
+    await chat.stop('a', room.id);
+    broadcast('b', 'What do you think of that?', 'public-followup');
+    await settle();
+    expect(runs).toHaveLength(5);
+    const followup = runs[4].context;
+    expect(followup.text).toContain('"speaker":"Astra"');
+    expect(followup.text).toContain('A matte orange finish.');
+    expect(followup.text).toContain('Sid’s current message:\nWhat do you think of that?');
+    expect(followup.text).not.toMatch(
+      /My own answer|private design|private answer|Abandoned partial/i,
+    );
+    expect(followup.instructions).not.toContain('matte orange');
+    expect(store.messaging.find(room.id, 'b', 'public-followup-b')?.text).toBe(
+      'What do you think of that?',
+    );
+    runs[4].release();
+    await settle();
+    broadcast('b', 'Anything else?', 'public-followup-later');
+    await settle();
+    expect(runs[5].context.text).toBe('Anything else?');
+  });
+  it('lets a participant go quiet, leave until invited, and return with the same voice preference', async () => {
+    const hangout = chat.hangout();
+    const broadcast = (seat: 'a' | 'b', label: string) =>
+      chat.submitMessage(
+        seat,
+        {
+          text: label,
+          broadcastId: label,
+          requestId: label + '-' + seat,
+          expectedRevision: hangout.revision,
+          intent: 'queue',
+        },
+        hangout.id,
+      );
+    broadcast('a', 'initial-room-post');
+    await settle();
+    const astra = runs[0].context;
+    await astra.tool('summarize_speech', { text: 'Before I went quiet.' });
+    await astra.tool('set_voice', { enabled: false });
+    broadcast('a', 'queued-before-leaving');
+    await astra.tool('leave_room', {});
+    await expect(astra.tool('set_voice', { enabled: true })).rejects.toThrow(/away/);
+    runs[0].release();
+    await settle();
+    expect(chat.hangoutPresence()).toEqual({
+      a: { present: false, voiceEnabled: false },
+      b: { present: true, voiceEnabled: true },
+    });
+    expect(chat.snapshot('a', hangout.id).messages[0].narration).toEqual({ status: 'quiet' });
+    expect(store.messaging.find(hangout.id, 'a', 'queued-before-leaving-a')?.status).toBe(
+      'cancelled',
+    );
+    expect(() => broadcast('a', 'while-away')).toThrow(/away/);
+    expect(() =>
+      chat.submitSide(hangout.id, 'a', {
+        text: 'Hello?',
+        requestId: 'while-away',
+        expectedRevision: hangout.revision,
+      }),
+    ).toThrow(/away/);
+    broadcast('b', 'while-away');
+    await settle();
+    const fable = runs[1].context;
+    await expect(fable.tool('address_panelist', { recipient: 'a' })).rejects.toThrow(/away/);
+    await fable.tool('summarize_speech', { text: 'My own voice is on.' });
+    runs[1].release();
+    await settle();
+    expect(chat.snapshot('b', hangout.id).messages[0].narration?.status).toBe('ready');
+    const reopened = new ChatStore(join(root, 'chat.sqlite'), root);
+    try {
+      expect(reopened.presence.get(reopened.runs.binding(hangout.id, 'a'))).toEqual({
+        present: false,
+        voiceEnabled: false,
+      });
+    } finally {
+      reopened.close();
+    }
+    expect(chat.inviteHangout('a').a).toEqual({ present: true, voiceEnabled: false });
+    await settle();
+    expect(runs).toHaveLength(2);
+    broadcast('a', 'after-invitation');
+    await settle();
+    const returned = runs[2].context;
+    expect(await returned.tool('summarize_speech', { text: 'Still quiet.' })).toBe(
+      'Your voice is off.',
+    );
+    await returned.tool('set_voice', { enabled: true });
+    await returned.tool('summarize_speech', { text: 'Back again.' });
+    runs[2].release();
+    await settle();
+    expect(chat.snapshot('a', hangout.id).messages.at(-1)?.narration).toMatchObject({
+      status: 'ready',
+      segments: ['Back again.'],
+    });
+  });
   afterEach(async () => {
     uncertain = false;
     await chat.onModuleDestroy();
@@ -118,6 +251,45 @@ describe('Durable seat messages', () => {
     await settle();
     expect(runs).toHaveLength(1);
     expect(chat.snapshot('a', runId).humanMessages?.[1].status).toBe('cancelled');
+  });
+  it('records a single broadcast identity across acknowledged seats and preserves turn authorship', async () => {
+    const broadcastId = 'broadcast-identity';
+    for (const seat of ['a', 'b'] as const) {
+      const input = {
+        broadcastId,
+        requestId: `${broadcastId}-${seat}`,
+        text: 'Compare your observations',
+        expectedRevision: chat.run(runId).revision,
+        intent: 'queue',
+      };
+      const first = chat.submitMessage(seat, input, runId);
+      expect(chat.submitMessage(seat, input, runId).id).toBe(first.id);
+    }
+    await settle();
+    for (const run of runs) run.release();
+    await settle();
+    const events = store.runs.correspondence(runId);
+    expect(
+      events.filter((event) => event.kind === 'message.queued').map((event) => event.payload),
+    ).toMatchObject([
+      { broadcastId, requestId: `${broadcastId}-a`, seat: 'a' },
+      { broadcastId, requestId: `${broadcastId}-b`, seat: 'b' },
+    ]);
+    expect(
+      events.filter((event) => event.kind === 'human.prompt').map((event) => event.payload.trigger),
+    ).toEqual(['intervention', 'intervention']);
+    for (const seat of ['a', 'b'] as const) {
+      const { provider, model } = store.runs.binding(runId, seat).config;
+      expect(
+        events.find((event) => event.kind === 'turn.finished' && event.role === seat)?.payload,
+      ).toMatchObject({
+        status: 'completed',
+        text: 'Partial output. Finished.',
+        provider,
+        model,
+        addressedTo: null,
+      });
+    }
   });
   it('interrupts before replacement and preserves partial text', async () => {
     send('first');

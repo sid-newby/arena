@@ -95,6 +95,17 @@ test('reports the server rejection instead of retrying panel prose', () => {
   assert.match(tracker.takeNotice(), /possible source code/);
 });
 
+test('a quiet hangout turn produces no speech or missing-summary warning', () => {
+  const tracker = new SpeechTracker();
+  assert.deepEqual(
+    tracker.collect('a', [
+      { ...reply('quiet', 'Reading along.', 'completed'), narration: { status: 'quiet' } },
+    ]),
+    [],
+  );
+  assert.equal(tracker.takeNotice(), undefined);
+});
+
 test('does not speak a response without a separate summary', () => {
   const tracker = new SpeechTracker();
   assert.deepEqual(
@@ -315,6 +326,32 @@ test('playback submits saved references without panel or narration text', async 
       segment: 0,
     });
     started[0].stop();
+  } finally {
+    queue.close();
+    globalThis.AudioContext = previousContext;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('silencing a speaker stops their active audio and queued phrases while the other speaker continues', async () => {
+  const previousContext = globalThis.AudioContext,
+    previousFetch = globalThis.fetch;
+  const requests = [];
+  started = [];
+  globalThis.AudioContext = Context;
+  globalThis.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body).agent);
+    return new Response(packet);
+  };
+  const queue = new SpeechQueue(() => {}, assert.fail);
+  try {
+    queue.enqueue([segment('a'), segment('a'), segment('b')]);
+    await until(() => started.length === 1);
+    queue.silence('a');
+    await until(() => started.length === 2);
+    assert.deepEqual(requests, ['a', 'b']);
+    started[1].stop();
+    await until(() => !queue.isBusy);
   } finally {
     queue.close();
     globalThis.AudioContext = previousContext;

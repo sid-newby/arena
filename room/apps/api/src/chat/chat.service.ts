@@ -1,3 +1,9 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { HonchoClient } from '../memory/honcho-client.js';
+import { HANGOUT_ID, recallTool } from '../memory/room-memory.js';
+import { recallRoomMessages } from '../memory/honcho-recall.js';
+import { modelName } from '../runs/participant-name.js';
 import { SideConversationService } from './side-conversation.service.js';
 import {
   MESSAGE_INTENTS,
@@ -29,9 +35,10 @@ import {
   type ProviderCatalog,
   type ProviderId,
 } from '../runs/run.contract.js';
+import { whisperPeerTool, type PeerWhispers } from './peer-whispers.js';
 import { PANEL_TARGETS, ROOM_TOOL_VERSION, panelPose, type PanelTarget } from './panel-presence.js';
 import { PANELISTS } from './panelist-delivery.js';
-import { runtimeTools } from './runtime-tools.js';
+import { hangoutInstructions, hangoutParticipationTools, runtimeTools } from './runtime-tools.js';
 import type {
   AgentId,
   AgentRuntime,
@@ -58,6 +65,7 @@ export class ChatService implements OnModuleDestroy {
   private readonly messagePumps = new Set<string>();
   private unsubscribeCommits?: () => void;
   private sideService?: SideConversationService;
+  private peerWhispers?: PeerWhispers;
   private destroyed = false;
   private readonly stopEpochs = new Map<string, number>();
   private readonly seatStopEpochs = new Map<string, number>();
@@ -75,10 +83,19 @@ export class ChatService implements OnModuleDestroy {
     this.workspace = resolve(
       process.env.ROOM_WORKSPACE ?? fileURLToPath(new URL('../../../../', import.meta.url)),
     );
-    this.store = new ChatStore(
-      process.env.ROOM_DB_PATH ?? resolve(this.workspace, '.room/chat.sqlite'),
-      this.workspace,
-    );
+    const dbPath = process.env.ROOM_DB_PATH ?? resolve(this.workspace, '.room/chat.sqlite');
+    this.store = new ChatStore(dbPath, this.workspace);
+    const configPath = join(dirname(dbPath), 'honcho-project');
+    const gcpProject =
+      process.env.HONCHO_GCP_PROJECT?.trim() ||
+      (dbPath !== ':memory:' && existsSync(configPath)
+        ? readFileSync(configPath, 'utf8').trim()
+        : '');
+    if (gcpProject)
+      this.store.runs.enableMemory(
+        new HonchoClient({ gcpProject }),
+        (channel) => new HonchoClient({ gcpProject, workspace: 'arena-whisper-' + channel }),
+      );
     this.observeCommits();
   }
   static forTest(
@@ -224,6 +241,59 @@ export class ChatService implements OnModuleDestroy {
   }
   refreshRun(runId: string) {
     this.emitBoth(runId);
+  }
+  hangout() {
+    return this.store.runs.ensureHangout();
+  }
+  hangoutPresence() {
+    this.hangout();
+    return {
+      a: this.store.presence.get(this.store.runs.binding(HANGOUT_ID, 'a')),
+      b: this.store.presence.get(this.store.runs.binding(HANGOUT_ID, 'b')),
+    };
+  }
+  inviteHangout(seat: AgentId) {
+    this.hangout();
+    const binding = this.store.runs.binding(HANGOUT_ID, seat);
+    if (!this.store.presence.isPresent(binding))
+      this.store.forRun(HANGOUT_ID).updateHangoutPresence(binding, { present: true });
+    return this.hangoutPresence();
+  }
+  requirePresent(binding: ParticipantBinding) {
+    if (!this.store.presence.isPresent(binding))
+      throw new ConflictException('This participant is away from the hangout.');
+  }
+  async searchHangoutMemory(body: unknown) {
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      !('query' in body) ||
+      typeof body.query !== 'string' ||
+      !body.query.trim() ||
+      body.query.trim().length > 500 ||
+      !('conversation' in body) ||
+      !['room', 'a', 'b'].includes(String(body.conversation))
+    )
+      throw new BadRequestException(
+        'Choose a conversation and enter a search of 1–500 characters.',
+      );
+    const memory = this.store.runs.memory;
+    if (!memory) throw new ServiceUnavailableException('Room memory is off.');
+    try {
+      const records =
+        body.conversation === 'room'
+          ? await recallRoomMessages(memory.client, body.query, [HANGOUT_ID])
+          : await memory.recallWhisper(
+              this.store.runs.binding(HANGOUT_ID, body.conversation as AgentId),
+              body.query,
+            );
+      return JSON.parse(records);
+    } catch {
+      throw new ServiceUnavailableException('Memory search is unavailable. Try again shortly.');
+    }
+  }
+  hangoutMemoryStatus() {
+    return this.store.runs.memory?.status() ?? { enabled: false };
   }
   currentRun() {
     return this.store.runs.current();
@@ -373,12 +443,15 @@ export class ChatService implements OnModuleDestroy {
     const now = Date.now();
     return {
       ...this.store.forRun(runId).snapshot(agent),
+      ...(runId === HANGOUT_ID
+        ? { hangoutPresence: this.store.presence.get(this.store.runs.binding(runId, agent)) }
+        : {}),
       expression: this.expressions(runId).snapshot(agent, now),
       serverNow: now,
     };
   }
   speechSegment(reference: SpeechReference): string {
-    if (reference.runId !== this.store.runs.currentId())
+    if (reference.runId !== HANGOUT_ID && reference.runId !== this.store.runs.currentId())
       throw new ConflictException('Speech belongs to another run.');
     const reply = this.store
       .forRun(reference.runId)
@@ -388,7 +461,9 @@ export class ChatService implements OnModuleDestroy {
       throw new ConflictException('Only completed replies can be spoken.');
     const narration = reply.narration;
     if (!narration || narration.status !== 'ready')
-      throw new ConflictException(narration?.reason ?? 'No spoken summary is available.');
+      throw new ConflictException(
+        narration?.status === 'unavailable' ? narration.reason : 'No spoken summary is available.',
+      );
     if (
       narration.revision !== reference.revision ||
       narration.segments[reference.segment] === undefined
@@ -417,6 +492,8 @@ export class ChatService implements OnModuleDestroy {
     this.listeners.get(this.key(agent, runId))?.forEach((send) => send(snapshot));
   }
   submit(agent: AgentId, body: unknown, runId = this.store.runs.currentId()) {
+    if (runId === HANGOUT_ID)
+      throw new BadRequestException('Use Both for the room or open a whisper to one person.');
     return this.submitInternal(agent, body, runId, 'human');
   }
   submitWorkflow(agent: AgentId, body: unknown, runId: string) {
@@ -464,6 +541,7 @@ export class ChatService implements OnModuleDestroy {
     };
     const existing = duplicate();
     if (existing) return existing;
+    this.requirePresent(this.store.runs.binding(runId, agent));
     this.executionPolicy?.submit(runId, source);
     if (expectedRevision !== undefined && expectedRevision !== this.store.runs.get(runId).revision)
       throw new ConflictException('The run configuration changed. Review the latest revision.');
@@ -494,6 +572,7 @@ export class ChatService implements OnModuleDestroy {
         throw new ConflictException(
           'The conversation stopped. Send your message again to continue.',
         );
+      this.requirePresent(this.store.runs.binding(runId, agent));
       const retried = duplicate();
       if (retried) return retried;
       if (this.active.has(key))
@@ -539,6 +618,10 @@ export class ChatService implements OnModuleDestroy {
             continue;
           const delivery = store.nextDelivery(agent);
           if (!delivery) continue;
+          if (!this.store.presence.isPresent(this.store.runs.binding(run.id, agent))) {
+            store.failDelivery(delivery.id, 'The recipient left the hangout.');
+            continue;
+          }
           const runtime = this.runtime(this.store.runs.binding(run.id, agent));
           if (runtime.info.status === 'unavailable') {
             store.failDelivery(
@@ -575,6 +658,16 @@ export class ChatService implements OnModuleDestroy {
       throw new BadRequestException(
         'Provide text, requestId, expectedRevision and a valid delivery intent.',
       );
+    const broadcastId = 'broadcastId' in body ? body.broadcastId : undefined;
+    if (
+      broadcastId !== undefined &&
+      (typeof broadcastId !== 'string' ||
+        !broadcastId ||
+        body.requestId !== `${broadcastId}-${agent}`)
+    )
+      throw new BadRequestException('The broadcast ID must match this seat’s request ID.');
+    if (runId === HANGOUT_ID && !broadcastId)
+      throw new BadRequestException('Use Both for the room or open a whisper to one person.');
     const intent = body.intent;
     if (intent !== 'send' && intent !== 'queue' && intent !== 'interrupt')
       throw new BadRequestException('Invalid delivery intent.');
@@ -594,6 +687,7 @@ export class ChatService implements OnModuleDestroy {
       return existing;
     }
     if (this.destroyed) throw new ServiceUnavailableException('The room is shutting down.');
+    this.requirePresent(binding);
     if (run.state === 'retained' || run.revision !== body.expectedRevision)
       throw new ConflictException('The run configuration changed or is read-only.');
     this.executionPolicy?.intervention?.(runId, agent, intent);
@@ -615,15 +709,18 @@ export class ChatService implements OnModuleDestroy {
     const runtime = this.runtime(binding);
     if (runtime.info.status === 'unavailable')
       throw new ServiceUnavailableException(runtime.info.reason);
-    const result = this.store.messaging.create({
-      runId,
-      seat: agent,
-      bindingId: binding.id,
-      revision: run.revision,
-      requestId: body.requestId,
-      text: body.text.trim(),
-      intent,
-    });
+    const result = this.store.messaging.create(
+      {
+        runId,
+        seat: agent,
+        bindingId: binding.id,
+        revision: run.revision,
+        requestId: body.requestId,
+        text: body.text.trim(),
+        intent,
+      },
+      broadcastId,
+    );
     this.emit(agent, runId);
     this.scheduleDrain(runId);
     return result;
@@ -655,6 +752,7 @@ export class ChatService implements OnModuleDestroy {
     const seatEpoch = this.seatStopEpochs.get(key) ?? 0;
     try {
       const binding = this.store.runs.binding(runId, agent);
+      this.requirePresent(binding);
       if (
         binding.id !== message.bindingId ||
         this.run(runId).revision !== this.store.messaging.dispatchRevision(message.id)
@@ -685,6 +783,7 @@ export class ChatService implements OnModuleDestroy {
         if (current.status !== 'cancelled') this.store.messaging.update(message, 'cancelled');
         return;
       }
+      this.requirePresent(binding);
       if (this.active.has(key))
         throw new ConflictException('Another reply started before delivery.');
       const id = randomUUID();
@@ -712,7 +811,7 @@ export class ChatService implements OnModuleDestroy {
     }
   }
   private startTurn(turn: TurnRow) {
-    const { id, agent, prompt: text } = turn;
+    const { id, agent } = turn;
     const store = this.store.forRun(turn.run_id);
     const binding = this.store.runs.bindingById(turn.binding_id);
     const runtime = this.runtime(binding);
@@ -726,13 +825,20 @@ export class ChatService implements OnModuleDestroy {
       Boolean(this.store.messaging.find(turn.run_id, agent, turn.request)),
     );
     const additions = policy?.definitions(binding);
-    const definitions = additions
-      ? [
-          ...new Map(
-            [...runtimeTools(binding.role), ...additions].map((tool) => [tool.name, tool]),
-          ).values(),
-        ]
-      : undefined;
+    const hangout = turn.run_id === HANGOUT_ID;
+    let handledWhisper = false;
+    const definitions =
+      additions || hangout
+        ? [
+            ...new Map(
+              [
+                ...runtimeTools(binding.role),
+                ...(additions ?? []),
+                ...(hangout ? [...hangoutParticipationTools, recallTool, whisperPeerTool] : []),
+              ].map((tool) => [tool.name, tool]),
+            ).values(),
+          ]
+        : undefined;
     const promise = Promise.resolve().then(async () => {
       const started = performance.now();
       try {
@@ -741,8 +847,17 @@ export class ChatService implements OnModuleDestroy {
         const savedSession = this.store.runs.session(binding.id)?.continuation;
         const savedToolVersion = this.store.runs.session(binding.id)?.toolVersion ?? 0;
         await runtime.run({
-          text,
+          text: store.publicTurnPrompt(turn),
           tools: definitions,
+          instructions: hangout
+            ? hangoutInstructions(
+                agent,
+                modelName(binding.config.model),
+                modelName(
+                  this.store.runs.binding(turn.run_id, agent === 'a' ? 'b' : 'a').config.model,
+                ),
+              )
+            : undefined,
           session: savedSession,
           toolVersion: savedToolVersion,
           priorHistory:
@@ -777,6 +892,25 @@ export class ChatService implements OnModuleDestroy {
           },
           tool: async (name, input) => {
             controller.signal.throwIfAborted();
+            if (name === whisperPeerTool.name) handledWhisper = true;
+            if (hangout) this.requirePresent(binding);
+            // Private arguments, results and failures must bypass shared tool telemetry.
+            if (name === whisperPeerTool.name) {
+              if (
+                !hangout ||
+                this.active.get(key)?.turn.id !== id ||
+                Object.keys(input).length !== 1 ||
+                typeof input.text !== 'string'
+              )
+                throw new Error('Invalid private whisper.');
+              const recipient = this.store.runs.binding(HANGOUT_ID, agent === 'a' ? 'b' : 'a');
+              this.requirePresent(recipient);
+              this.peerWhispers ??= this.store.createPeerWhispers(
+                this.runtimeFactory,
+                this.workspace,
+              );
+              return this.peerWhispers.send(binding, recipient, id, input.text, controller.signal);
+            }
             const toolId = this.store.runs.state.startTool(id, name);
             const toolStarted = performance.now();
             try {
@@ -791,7 +925,29 @@ export class ChatService implements OnModuleDestroy {
                 input.text.trim() &&
                 input.text.length <= 16000
               ) {
-                output = 'Spoken summary recorded.';
+                output =
+                  hangout && !this.store.presence.get(binding).voiceEnabled
+                    ? 'Your voice is off.'
+                    : 'Spoken summary recorded.';
+              } else if (
+                hangout &&
+                name === 'set_voice' &&
+                typeof input.enabled === 'boolean' &&
+                Object.keys(input).length === 1
+              ) {
+                store.updateHangoutPresence(binding, { voiceEnabled: input.enabled });
+                output = input.enabled ? 'Your voice is on.' : 'Your voice is off.';
+              } else if (hangout && name === 'leave_room' && Object.keys(input).length === 0) {
+                store.updateHangoutPresence(binding, { present: false });
+                this.peerWhispers?.stop(binding);
+                await this.sideService?.stop(HANGOUT_ID, agent);
+                output = 'You have left the hangout. Sid can invite you back.';
+              } else if (hangout && name === 'recall_room') {
+                if (typeof input.query !== 'string' || Object.keys(input).length !== 1)
+                  throw new BadRequestException('Provide a search query.');
+                const memory = this.store.runs.memory;
+                if (!memory) throw new Error('Room memory is off.');
+                output = await recallRoomMessages(memory.client, input.query, [HANGOUT_ID]);
               } else if (name === 'address_panelist') {
                 if (
                   Object.keys(input).length !== 1 ||
@@ -799,6 +955,8 @@ export class ChatService implements OnModuleDestroy {
                   input.recipient === agent
                 )
                   throw new BadRequestException('Provide only the other panelist recipient.');
+                if (hangout)
+                  this.requirePresent(this.store.runs.binding(HANGOUT_ID, input.recipient));
                 policy?.address(turn.run_id, id);
                 output = JSON.stringify(store.address(id, input.recipient));
                 this.emit(agent, turn.run_id);
@@ -873,7 +1031,12 @@ export class ChatService implements OnModuleDestroy {
               this.store.messaging.update(receipt, 'uncertain', { error: error.message });
           }
         } else {
-          const message = error instanceof Error ? error.message : 'The agent connection failed.';
+          // Provider diagnostics can echo a private tool payload.
+          const message = handledWhisper
+            ? 'The agent connection failed during a private exchange.'
+            : error instanceof Error
+              ? error.message
+              : 'The agent connection failed.';
           store.finish(id, 'failed', performance.now() - started);
           store.setError(agent, message);
           if (/auth|unauthorized|api.key|login|401|403|model.*(not|unavailable)/i.test(message)) {
@@ -891,6 +1054,7 @@ export class ChatService implements OnModuleDestroy {
     this.emitBoth(turn.run_id);
   }
   async stop(agent: AgentId, runId = this.store.runs.currentId()) {
+    if (runId === HANGOUT_ID) this.peerWhispers?.stop(this.store.runs.binding(runId, agent));
     const key = this.key(agent, runId);
     this.seatStopEpochs.set(key, (this.seatStopEpochs.get(key) ?? 0) + 1);
     this.store.messaging.cancelPending(runId, agent);
@@ -934,6 +1098,7 @@ export class ChatService implements OnModuleDestroy {
     active.forEach((turn) => turn.controller.abort());
     await Promise.allSettled(active.map((turn) => turn.promise));
     for (const expressions of this.expressionRuns.values()) expressions.close();
+    await this.store.runs.memory?.close();
     this.store.close();
   }
 }

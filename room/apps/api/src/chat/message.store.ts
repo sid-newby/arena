@@ -78,7 +78,7 @@ export class SeatMessageStore {
     if (!row) throw new NotFoundException('Unknown seat message.');
     return receipt(row);
   }
-  create(input: Omit<MessageReceipt, 'id' | 'status' | 'createdAt'>) {
+  create(input: Omit<MessageReceipt, 'id' | 'status' | 'createdAt'>, broadcastId?: string) {
     return this.transaction(() => {
       const id = randomUUID();
       this.db
@@ -101,6 +101,8 @@ export class SeatMessageStore {
         .run(input.revision, id);
       this.event(input.runId, 'message.queued', {
         messageId: id,
+        requestId: input.requestId,
+        ...(broadcastId ? { broadcastId } : {}),
         seat: input.seat,
         intent: input.intent,
         text: input.text,

@@ -94,6 +94,27 @@ describe('Local room API boundaries', () => {
     vi.unstubAllEnvs();
     rmSync(controlRoot, { recursive: true, force: true });
   });
+  it('opens the same Astra and Fable hangout without changing the selected debate', async () => {
+    const api = request(app.getHttpServer());
+    const before = (await api.get('/api/runs/current').set('Host', host).expect(200)).body;
+    const first = (await api.get('/api/runs/hangout').set('Host', host).expect(200)).body;
+    expect(first).toMatchObject({
+      id: 'hangout',
+      state: 'ready',
+      seats: {
+        a: { provider: 'codex', model: 'gpt-6-astra', effort: 'high' },
+        b: { provider: 'anthropic', model: 'claude-fable-5-1', effort: 'high' },
+      },
+    });
+    expect((await api.get('/api/runs/hangout').set('Host', host).expect(200)).body).toEqual(first);
+    const choices = (await api.get('/api/runs').set('Host', host).expect(200)).body;
+    expect(choices.runs).not.toContainEqual(expect.objectContaining({ id: 'hangout' }));
+    await api.post('/api/runs/hangout/select').set('Host', host).expect(409);
+    expect((await api.get('/api/runs/current').set('Host', host).expect(200)).body).toEqual(before);
+    const snapshot = (await api.get('/api/runs/hangout/agents/b').set('Host', host).expect(200))
+      .body;
+    expect(snapshot).toMatchObject({ runId: 'hangout', messages: [] });
+  });
   it('returns durable message receipts and supports cancelling a queued follow-up over HTTP', async () => {
     const run = (
       await request(app.getHttpServer()).get('/api/runs/current').set('Host', host).expect(200)

@@ -21,6 +21,8 @@ export function SideConversation({
   runId,
   seat,
   name,
+  hangout,
+  away,
   snapshot,
   connection,
   disabled,
@@ -31,6 +33,8 @@ export function SideConversation({
   runId?: string;
   seat: AgentId;
   name: string;
+  hangout: boolean;
+  away: boolean;
   snapshot?: SideConversationSnapshot;
   connection: string;
   disabled: boolean;
@@ -44,7 +48,7 @@ export function SideConversation({
   const working =
     snapshot?.status === 'working' ||
     snapshot?.messages.some((message) => message.status === 'queued');
-  const available = !disabled && Boolean(runId && snapshot) && connection === 'connected';
+  const available = !disabled && !away && Boolean(runId && snapshot) && connection === 'connected';
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
@@ -52,10 +56,10 @@ export function SideConversation({
           size="sm"
           variant="ghost"
           disabled={disabled || !runId}
-          aria-label={`Side conversation with ${name}`}
+          aria-label={hangout ? `Whisper to ${name}` : `Side conversation with ${name}`}
         >
           <MessageSquare />
-          Side conversation
+          {hangout ? `Whisper to ${name}` : 'Side conversation'}
         </Button>
       </Dialog.Trigger>
       <Dialog.Portal>
@@ -71,10 +75,13 @@ export function SideConversation({
         >
           <header className="side-heading">
             <div>
-              <Dialog.Title>Side conversation · {name}</Dialog.Title>
+              <Dialog.Title>
+                {hangout ? `Sid + ${name}` : `Side conversation · ${name}`}
+              </Dialog.Title>
               <Dialog.Description>
-                Private to this seat. The main task keeps running. Side replies do not edit files or
-                become task outputs.
+                {hangout
+                  ? `Only you and ${name} share these whispers. The room won’t play them aloud.`
+                  : 'Private to this seat. The main task keeps running. Side replies do not edit files or become task outputs.'}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -86,9 +93,11 @@ export function SideConversation({
           <output className="side-state">
             {connection !== 'connected' || !snapshot
               ? 'Waiting for connection'
-              : working
-                ? 'Working · another message will queue'
-                : 'Ready'}
+              : away
+                ? `${name} is away. Invite them back to send a whisper.`
+                : working
+                  ? 'Working · another message will queue'
+                  : 'Ready'}
           </output>
           {(connection !== 'connected' || !snapshot || error) && (
             <Button type="button" variant="ghost" size="sm" onClick={reconnect}>
@@ -106,14 +115,16 @@ export function SideConversation({
                 >
                   {!snapshot?.messages.length && (
                     <p className="side-empty">
-                      Ask a separate question without interrupting the main task.
+                      {hangout
+                        ? `Start a whisper with ${name}.`
+                        : 'Ask a separate question without interrupting the main task.'}
                     </p>
                   )}
                   {snapshot?.messages.map((message) => (
                     <MessageScrollerItem key={message.id} messageId={message.id}>
                       <article className="side-message">
                         <p className="side-prompt">
-                          <span>You</span>
+                          <span>{hangout ? 'Sid' : 'You'}</span>
                           {message.prompt}
                         </p>
                         <div className="side-reply">
@@ -147,7 +158,7 @@ export function SideConversation({
                                 setOpen(false);
                               }}
                             >
-                              Use in main draft
+                              {hangout ? 'Copy to room draft' : 'Use in main draft'}
                             </Button>
                           )}
                         </div>
@@ -164,7 +175,7 @@ export function SideConversation({
             noValidate
             onSubmit={(event) => {
               event.preventDefault();
-              void side.send();
+              if (available) void side.send();
             }}
           >
             {(side.error || error || snapshot?.error) && (
@@ -186,7 +197,7 @@ export function SideConversation({
               aria-describedby={
                 side.error || error || snapshot?.error ? `side-error-${seat}` : undefined
               }
-              placeholder="Ask this seat privately…"
+              placeholder={hangout ? `Whisper to ${name}…` : 'Ask this seat privately…'}
               onKeyDown={(event) => {
                 if (
                   event.key === 'Enter' &&
@@ -195,12 +206,16 @@ export function SideConversation({
                   event.keyCode !== 229
                 ) {
                   event.preventDefault();
-                  void side.send();
+                  if (available) void side.send();
                 }
               }}
             />
             <div className="side-actions">
-              <span>Only an explicit main send changes the task.</span>
+              <span>
+                {hangout
+                  ? 'This message stays in your one-on-one conversation.'
+                  : 'Only an explicit main send changes the task.'}
+              </span>
               {working && (
                 <Button
                   type="button"
@@ -220,7 +235,13 @@ export function SideConversation({
                 disabled={!available || side.pending || !side.draft.trim()}
               >
                 <ArrowUpRight />
-                {side.pending ? 'Saving…' : working ? 'Queue side message' : 'Send side message'}
+                {side.pending
+                  ? 'Saving…'
+                  : working
+                    ? 'Queue side message'
+                    : hangout
+                      ? 'Send whisper'
+                      : 'Send side message'}
               </Button>
             </div>
           </form>

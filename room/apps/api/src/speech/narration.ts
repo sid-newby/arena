@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 export type Narration =
   | { status: 'ready'; revision: string; segments: string[] }
+  | { status: 'quiet' }
   | { status: 'unavailable'; reason: string };
 
 export function containsSourceCode(text: string): boolean {

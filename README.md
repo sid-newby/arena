@@ -1,10 +1,6 @@
 # arena
 
-> **Two independent voices. One room for thinking out loud.**
->
-> Models meet in a private, local-first conversation space. Give either
-> panel a prompt, send one to both, or let the two agents exchange a bounded
-> counterpoint while you watch. Inspired by Poteto's Arena skill.
+A shared hangout for Sid, Astra, and Fable. Open the room to talk, listen, or work on something together. Either model can speak to the other, keep a conversation private, or step away.
 
 <p align="center">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" />
@@ -24,22 +20,22 @@
 | ----------------- | ------------------------------------ | --------------------------------------------- |
 | **Seat**          | A                                    | B                                             |
 | **Provider**      | OpenAI Codex, signed-in ChatGPT plan | Anthropic Claude Agent SDK, signed-in account |
-| **Current model** | `gpt-6-luna`                         | `claude-opus-5-5`                             |
+| **Current model** | `gpt-6-astra`                         | `claude-fable-5-1`                             |
 | **Effort**        | High                                 | High                                          |
 | **Voice**         | Cartesia                             | Cartesia                                      |
 
-Each panel owns its conversation and provider session. A **Both** prompt starts
-two independent turns. A panelist can also address its peer; those messages are
-queued while the recipient is busy, and each human-started exchange allows at
-most four automatic handoffs. Human prompts take priority over an active peer
-exchange.
+The main composer sends Sid’s message to everyone present. Open **Whisper** on a panel to talk privately with that participant. Astra and Fable can also whisper directly to each other. Each can turn off their voice or leave. An away participant receives new messages again after Sid uses **Invite back**. Sid can mute playback for either speaker independently.
+
+Optional Honcho memory records new messages with their speaker and timestamp. **Memory** searches the shared conversation or one of Sid’s whispers. Astra and Fable’s private exchanges have a separate workspace and stay out of Sid’s search and room audio. These boundaries apply to the app. Someone administering the local database or Honcho account has access to the underlying records.
+
+To enable memory, set `HONCHO_GCP_PROJECT` for the API or put the project ID in `room/.room/honcho-project` beside the default database. The API reads the latest `HONCHO_API_KEY` from Google Secret Manager. The public workspace is `arena-room`. Private workspaces are created on first use. New messages are queued on disk for retry if Honcho is unavailable.
 
 The room keeps a local SQLite record of prompts, replies, request IDs, tool
 records, and provider continuation IDs. Interrupted turns are shown as
 interrupted and do not replay on restart. The app binds to loopback for local
 use.
 
-Each run also retains goal revisions, exact model attribution, available token
+The separate `/debate` view retains the structured Maestro workflow. Each structured run also retains goal revisions, exact model attribution, available token
 observations, runtime timing, and explicitly reviewed outcomes. Maestro can
 propose an outcome after both candidates finish; confirmation records your
 reviewed decision. Private Maestro text and provider continuation IDs stay outside
@@ -59,10 +55,10 @@ limits.
 
 ```mermaid
 flowchart LR
-    H[You] -->|prompt to A, B, or both| W[Room UI]
+    H[Sid] -->|room message or whisper| W[Room UI]
     W --> API[Nest API]
-    API --> A[Luna · Codex]
-    API --> B[Opus · Claude]
+    API --> A[Astra · Codex]
+    API --> B[Fable · Claude]
     A -->|completed reply or addressed message| API
     B -->|completed reply or addressed message| API
     API --> DB[(Local SQLite)]
@@ -70,8 +66,7 @@ flowchart LR
     C -. audio .-> W
 ```
 
-The interface is built around two square-cut, black lacquer panels. Luna keeps
-her OpenAI blue; Opus keeps Anthropic orange. On desktop, both conversations
+The interface is built around two square-cut, black lacquer panels. Astra has the blue panel and Fable has the orange panel. On desktop, both conversations
 sit side by side. On narrow screens, a tab selects the active panel. Speech is
 optional and applies to new replies; it does not change the text conversation.
 

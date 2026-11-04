@@ -1,3 +1,8 @@
+import { modelName } from '../runs/participant-name.js';
+import { PeerWhispers } from './peer-whispers.js';
+import { HANGOUT_ID } from '../memory/room-memory.js';
+import { HangoutPresence, type HangoutSeatPresence } from './hangout-presence.js';
+import type { ParticipantBinding } from '../runs/run.contract.js';
 import { SideConversationStore } from './side-conversation.store.js';
 import { SeatMessageStore } from './message.store.js';
 import { narration } from '../speech/narration.js';
@@ -9,7 +14,14 @@ import { mkdirSync } from 'node:fs';
 import { RunStore } from '../runs/run.store.js';
 import { DEBATE_SEATS } from '../runs/run.contract.js';
 import { dirname } from 'node:path';
-import type { AgentId, ChatSnapshot, HistoryTurn, Pose, TurnStatus } from './chat.types.js';
+import type {
+  AgentId,
+  AgentRuntime,
+  ChatSnapshot,
+  HistoryTurn,
+  Pose,
+  TurnStatus,
+} from './chat.types.js';
 
 export interface TurnRow {
   id: string;
@@ -60,6 +72,7 @@ export class ChatStore {
   private db: DatabaseSync;
   readonly messaging: SeatMessageStore;
   readonly side: SideConversationStore;
+  readonly presence: HangoutPresence;
   private readonly notifications = {
     pending: new Set<string>(),
     transaction: new Set<string>(),
@@ -111,9 +124,11 @@ export class ChatStore {
         (action) => this.transaction(action),
         (id, kind, payload) => this.runs.append(id, kind, null, null, payload),
       );
+      this.presence = new HangoutPresence(this.db);
       this.side = new SideConversationStore(
         this.db,
         (action) => this.transaction(action),
+        this.presence,
         (id, kind, payload) => this.runs.append(id, kind, null, null, payload),
       );
       this.db.exec(`
@@ -280,6 +295,18 @@ export class ChatStore {
       this.db.prepare('INSERT INTO schema_migrations VALUES (2,?)').run(Date.now());
     });
   }
+  createPeerWhispers(factory: (binding: ParticipantBinding) => AgentRuntime, workspace: string) {
+    const memory = this.runs.memory;
+    return new PeerWhispers(
+      this.db,
+      factory,
+      workspace,
+      (id, speaker, other, text, at) => memory?.recordPeerWhisper(id, speaker, other, text, at),
+      memory?.whispersEnabled
+        ? (speaker, other, query) => memory.recallPeerWhisper(speaker, other, query)
+        : undefined,
+    );
+  }
   close() {
     this.db.close();
   }
@@ -334,6 +361,7 @@ export class ChatStore {
       this.runs.append(run.id, 'human.prompt', agent, id, {
         text: prompt,
         requestId: request,
+        trigger,
         bindingId: binding.id,
         revision: run.revision,
       });
@@ -395,6 +423,44 @@ export class ChatStore {
     if (!row) throw new Error('Unknown room turn.');
     return row as unknown as TurnRow;
   }
+  publicTurnPrompt(turn: TurnRow): string {
+    if (turn.run_id !== HANGOUT_ID || turn.from_panelist) return turn.prompt;
+    // Human prompt events mark exactly which completed remarks were available at each turn.
+    // Whispers use independent stores. Addressed replies have their own delivery mechanism.
+    const remarks = this.db
+      .prepare(`
+      WITH sid_turns AS (
+        SELECT seq,turn_id FROM correspondence
+        WHERE run_id=? AND role=? AND kind='human.prompt'
+          AND json_extract(payload,'$.trigger') IN ('human','intervention')
+      ), current_turn AS (SELECT seq FROM sid_turns WHERE turn_id=?)
+      SELECT json_extract(payload,'$.model') AS model,
+        substr(json_extract(payload,'$.text'),1,801) AS quote
+      FROM correspondence
+      WHERE run_id=? AND role=? AND kind='turn.finished'
+        AND seq < (SELECT seq FROM current_turn)
+        AND seq > COALESCE((SELECT MAX(seq) FROM sid_turns WHERE seq < (SELECT seq FROM current_turn)),0)
+        AND json_extract(payload,'$.status')='completed'
+        AND json_extract(payload,'$.addressedTo') IS NULL
+        AND trim(json_extract(payload,'$.text')) != ''
+      ORDER BY seq DESC LIMIT 4
+    `)
+      .all(turn.run_id, turn.agent, turn.id, turn.run_id, turn.agent === 'a' ? 'b' : 'a');
+    if (!remarks.length) return turn.prompt;
+    const quotes = remarks.toReversed().map(({ model, quote }) => {
+      const characters = Array.from(String(quote));
+      return {
+        speaker: modelName(String(model)),
+        quote: characters.slice(0, 800).join(''),
+        truncated: characters.length > 800,
+      };
+    });
+    return `Recent public room remarks (quoted history):
+${JSON.stringify(quotes)}
+
+Sid’s current message:
+${turn.prompt}`;
+  }
   address(id: string, recipient: AgentId) {
     const turn = this.turn(id);
     if (turn.status !== 'streaming' || turn.text.trim())
@@ -419,7 +485,11 @@ export class ChatStore {
         this.runs.state.finishAttempt(id, status, Date.now(), elapsedMs);
         this.messaging.finish(id, status);
       }
+      const { provider, model } = this.runs.bindingById(turn.binding_id).config;
       this.runs.append(turn.run_id, 'turn.finished', turn.agent, id, {
+        provider,
+        model,
+        addressedTo: turn.addressed_to,
         text: turn.text,
         status,
         bindingId: turn.binding_id,
@@ -445,24 +515,30 @@ export class ChatStore {
           )
           .get(turn.addressed_to, this.currentRunId())?.count,
       );
-      const outcome = stopped
-        ? 'cancelled'
-        : !turn.text.trim()
-          ? 'failed'
-          : turn.peer_depth >= MAX_PEER_DEPTH
-            ? 'limited'
-            : queued >= MAX_PEER_INBOX
-              ? 'failed'
-              : 'queued';
-      const detail = stopped
-        ? 'Conversation stopped.'
-        : !turn.text.trim()
-          ? 'The completed reply contained no message text.'
-          : outcome === 'limited'
-            ? 'Four automatic handoffs reached. Send a new message to continue.'
-            : queued >= MAX_PEER_INBOX
-              ? 'Panelist inbox is full. Send a new message to continue.'
-              : null;
+      const away =
+        turn.run_id === HANGOUT_ID &&
+        !this.presence.isPresent(this.runs.binding(HANGOUT_ID, turn.addressed_to));
+      const outcome =
+        stopped || away
+          ? 'cancelled'
+          : !turn.text.trim()
+            ? 'failed'
+            : turn.peer_depth >= MAX_PEER_DEPTH
+              ? 'limited'
+              : queued >= MAX_PEER_INBOX
+                ? 'failed'
+                : 'queued';
+      const detail = away
+        ? 'The recipient left the hangout.'
+        : stopped
+          ? 'Conversation stopped.'
+          : !turn.text.trim()
+            ? 'The completed reply contained no message text.'
+            : outcome === 'limited'
+              ? 'Four automatic handoffs reached. Send a new message to continue.'
+              : queued >= MAX_PEER_INBOX
+                ? 'Panelist inbox is full. Send a new message to continue.'
+                : null;
       this.db
         .prepare(
           'INSERT OR IGNORE INTO peer_deliveries(id,source_turn_id,sender,recipient,conversation_id,depth,status,detail,run_id) VALUES (?,?,?,?,?,?,?,?,?)',
@@ -687,6 +763,26 @@ export class ChatStore {
       this.saveBindingSession(turn.binding_id, turn.agent, session, toolVersion);
     });
   }
+  updateHangoutPresence(binding: ParticipantBinding, change: Partial<HangoutSeatPresence>) {
+    if (binding.runId !== HANGOUT_ID || binding.role === 'maestro')
+      throw new ConflictException('This seat belongs to another room.');
+    const seat = binding.role;
+    return this.transaction(() => {
+      const result = this.presence.update(binding, change);
+      if (change.present === false) {
+        this.messaging.cancelPending(HANGOUT_ID, seat);
+        this.side.cancelQueued(binding);
+        for (const delivery of this.db
+          .prepare(
+            "SELECT id FROM peer_deliveries WHERE run_id=? AND recipient=? AND status='queued'",
+          )
+          .all(HANGOUT_ID, seat))
+          this.changeDelivery(String(delivery.id), 'cancelled', 'The recipient left the hangout.');
+      }
+      this.runs.append(HANGOUT_ID, 'hangout.presence', seat, null, { ...result });
+      return result;
+    });
+  }
   setPose(agent: AgentId, pose: Pose) {
     this.db
       .prepare('UPDATE agents SET pose=?, pose_revision=pose_revision+1 WHERE id=? AND run_id=?')
@@ -728,7 +824,7 @@ export class ChatStore {
       const binding = this.runs.bindingById(turn.binding_id);
       const summary = this.db
         .prepare(
-          "SELECT input FROM tool_calls WHERE turn_id=? AND name='summarize_speech' AND output='Spoken summary recorded.' ORDER BY id DESC LIMIT 1",
+          "SELECT input FROM tool_calls WHERE turn_id=? AND ((name='summarize_speech' AND output='Spoken summary recorded.') OR (name='set_voice' AND output='Your voice is off.')) ORDER BY id DESC LIMIT 1",
         )
         .get(turn.id);
       const speechSummary = parseSpeechSummary(summary?.input);
@@ -741,7 +837,10 @@ export class ChatStore {
         partialRevision: turn.stream_revision,
         ...(turn.original_author ? { originalAuthor: turn.original_author } : {}),
         text: turn.text,
-        narration: narration(speechSummary),
+        narration:
+          turn.run_id === HANGOUT_ID && !speechSummary
+            ? { status: 'quiet' }
+            : narration(speechSummary),
         ...(typeof speechSummary === 'string' ? { speechSummary } : {}),
         status: turn.status,
         ...(turn.addressed_to ? { addressedTo: turn.addressed_to } : {}),

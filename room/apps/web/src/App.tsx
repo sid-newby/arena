@@ -1,16 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './arena.css';
 import { Tabs } from 'radix-ui';
 import { ArrowLeft, ArrowRight, MoveUpRight, LocateFixed, RotateCcw, Square } from 'lucide-react';
 import { AgentPanel } from '@/components/agent-panel';
 import { Button } from '@/components/ui/button';
+import { HangoutMemory } from '@/components/hangout-memory';
 import { ThemeControls } from '@/components/theme-controls';
 import { MaestroDialog } from '@/components/maestro-dialog';
 import { SpeechControls } from '@/components/speech-controls';
 import { useAgents } from '@/hooks/use-agents';
 import { useSpeech } from '@/hooks/use-speech';
 import { agentIds, modelPanelName, panelistName, type AgentId, type Pose } from '@/lib/agents';
-import { assertSendScope, type SendScope } from '@/lib/run-scope';
+import { assertSendScope, type DeliveryBatch } from '@/lib/run-scope';
 import { ExpressionLab } from '@/components/expression-lab';
 import type { ExpressionSnapshot } from '@/lib/panel-expression';
 import type { ActivityFrame } from '@/lib/panel-motion';
@@ -25,7 +26,11 @@ function readEffectsEnabled() {
 }
 
 export default function App() {
-  const room = useAgents();
+  const debate = window.location.pathname.replace(/\/$/, '') === '/debate';
+  useEffect(() => {
+    document.title = debate ? 'Arena' : 'The Hangout · Arena';
+  }, [debate]);
+  const room = useAgents(debate ? 'debate' : 'hangout');
   const [preview, setPreview] = useState(false);
   const speech = useSpeech(room.agents, preview, room.runId);
   const [conversationAction, setConversationAction] = useState<
@@ -62,7 +67,7 @@ export default function App() {
     id: AgentId,
     text: string,
     requestId: string,
-    scope: SendScope,
+    scope: DeliveryBatch,
     intent: MessageIntent,
   ) {
     assertSendScope(room.runId ?? '', scope);
@@ -110,9 +115,11 @@ export default function App() {
         <h1 className="wordmark">
           arena<span aria-hidden="true">.</span>
         </h1>
-        <span className="room-description">A little room for big thoughts.</span>
+        <span className="room-description">
+          {debate ? 'A little room for big thoughts.' : 'The hangout'}
+        </span>
         <div className="room-tools">
-          <MaestroDialog runId={room.runId} disabled={preview} />
+          {debate && <MaestroDialog runId={room.runId} disabled={preview} />}
           <output className="room-connection">
             <i data-connected={connected || undefined} />
             {room.apiError
@@ -133,6 +140,7 @@ export default function App() {
             Preview
             <span className="toggle-light" />
           </Button>
+          {!debate && <HangoutMemory />}
           <ThemeControls />
           <Button
             size="sm"
@@ -177,6 +185,7 @@ export default function App() {
                 {...room}
                 send={send}
                 preview={preview}
+                hangout={!debate}
                 effectsEnabled={effectsEnabled}
                 selected={selected === id}
                 developmentExpression={developmentExpressions[id]}
@@ -254,7 +263,7 @@ export default function App() {
           ))}
         </div>
         <div className="room-utility">
-          <SpeechControls speech={speech} preview={preview} />
+          <SpeechControls speech={speech} preview={preview} hangout={!debate} />
           <div className="conversation-controls">
             <Button
               size="sm"

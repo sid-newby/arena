@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/message-scroller';
 import {
   agentIds,
+  api,
   panelistName,
   modelPanelName,
   panelistDeliveryLabel,
@@ -35,12 +36,7 @@ import {
   type Pose,
   type Reply,
 } from '@/lib/agents';
-import {
-  deliveryMatches,
-  prepareDelivery,
-  type DeliveryBatch,
-  type SendScope,
-} from '@/lib/run-scope';
+import { deliveryMatches, prepareDelivery, type DeliveryBatch } from '@/lib/run-scope';
 import { ReplyMarkdown } from '@/components/reply-markdown';
 import type { AgentState } from '@/hooks/use-agents';
 import { usePanelExpression } from '@/hooks/use-panel-expression';
@@ -56,6 +52,7 @@ type Props = {
   runId?: string;
   agents: Record<AgentId, AgentState>;
   preview: boolean;
+  hangout: boolean;
   pose: Pose | 'lean' | undefined;
   apiError?: string;
   reconnect: () => void;
@@ -63,7 +60,7 @@ type Props = {
     id: AgentId,
     text: string,
     requestId: string,
-    scope: SendScope,
+    scope: DeliveryBatch,
     intent: MessageIntent,
   ) => Promise<void>;
   stop: (id: AgentId) => Promise<void>;
@@ -86,6 +83,8 @@ function AgentReply({ reply, name, preview }: { reply: Reply; name: string; prev
       setCopyError(true);
     }
   }
+  if (!reply.text.trim() && reply.status === 'completed' && reply.narration?.status === 'quiet')
+    return null;
   return (
     <Message className="agent-message">
       <MessageContent>
@@ -119,7 +118,7 @@ function AgentReply({ reply, name, preview }: { reply: Reply; name: string; prev
             </div>
           </BubbleContent>
         </Bubble>
-        {!preview && reply.status === 'completed' && (
+        {!preview && reply.status === 'completed' && reply.narration?.status !== 'quiet' && (
           <details className="reply-narration">
             <summary>Spoken summary</summary>
             {reply.narration?.status === 'ready' ? (
@@ -160,6 +159,7 @@ export function AgentPanel({
   runId,
   agents,
   preview,
+  hangout,
   pose,
   apiError,
   reconnect,
@@ -204,27 +204,59 @@ export function AgentPanel({
   const input = useRef<HTMLTextAreaElement>(null);
   const [intent, setIntent] = useState<MessageIntent>('queue');
   const [cancelling, setCancelling] = useState<string>();
-  const [destination, setDestination] = useState<'self' | 'both'>('self');
+  const [debateDestination, setDestination] = useState<'self' | 'both'>('self');
+  const destination = hangout ? 'both' : debateDestination;
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [delivery, setDelivery] = useState<DeliveryBatch>();
   const flight = useRef(false);
-  const targets = destination === 'both' ? [...agentIds] : [id];
+  const [inviting, setInviting] = useState(false);
+  const presence = hangout ? agent.snapshot.hangoutPresence : undefined;
+  const away = presence?.present === false;
+  async function inviteBack() {
+    setInviting(true);
+    setError(undefined);
+    try {
+      await api(`/api/runs/hangout/invite/${id}`, () => undefined, { method: 'POST' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not invite this person back.');
+    } finally {
+      setInviting(false);
+    }
+  }
+  const presenceReady =
+    !hangout || agentIds.every((target) => Boolean(agents[target].snapshot.hangoutPresence));
+  const targets = hangout
+    ? agentIds.filter((target) => agents[target].snapshot.hangoutPresence?.present === true)
+    : destination === 'both'
+      ? [...agentIds]
+      : [id];
   const scope =
     runId && snapshot.runId === runId && snapshot.revision !== undefined
       ? { runId, revision: snapshot.revision }
       : undefined;
+  // Keep the broadcast ID and acknowledgements when someone leaves during a partial send.
+  const retry =
+    hangout &&
+    delivery &&
+    scope &&
+    delivery.runId === scope.runId &&
+    delivery.text === draft.trim() &&
+    delivery.intent === intent
+      ? { ...delivery, targets }
+      : delivery;
   const waitingTargets =
-    scope && deliveryMatches(delivery, scope, draft.trim(), targets, intent)
-      ? targets.filter((target) => !delivery?.delivered.has(target))
+    scope && deliveryMatches(retry, scope, draft.trim(), targets, intent)
+      ? targets.filter((target) => !retry?.delivered.has(target))
       : targets;
   const targetAvailable = (target: AgentId) =>
     agents[target].info?.status === 'ready' &&
     agents[target].connection === 'connected' &&
     (intent !== 'send' || agents[target].snapshot.status !== 'working') &&
     !agents[target].pending;
-  const available = Boolean(scope) && waitingTargets.every(targetAvailable);
+  const available =
+    Boolean(scope) && presenceReady && targets.length > 0 && waitingTargets.every(targetAvailable);
   const working = !preview && (snapshot.status === 'working' || agent.pending);
   const busyTargets = targets.some((target) => agents[target].snapshot.status === 'working');
   const receipts = snapshot.humanMessages ?? [];
@@ -262,13 +294,15 @@ export function AgentPanel({
             disconnected: 'Disconnected',
           } as const
         )[agent.connection]
-      : agent.info?.status === 'unavailable'
-        ? 'Not configured'
-        : working
-          ? 'Thinking'
-          : snapshot.status === 'failed'
-            ? 'Failed'
-            : 'Ready';
+      : away
+        ? 'Away'
+        : agent.info?.status === 'unavailable'
+          ? 'Not configured'
+          : working
+            ? 'Thinking'
+            : snapshot.status === 'failed'
+              ? 'Failed'
+              : 'Ready';
 
   async function submit() {
     const text = draft.trim();
@@ -276,7 +310,7 @@ export function AgentPanel({
     flight.current = true;
     setSubmitting(true);
     setError(undefined);
-    const batch = prepareDelivery(delivery, scope, text, targets, crypto.randomUUID(), intent);
+    const batch = prepareDelivery(retry, scope, text, targets, crypto.randomUUID(), intent);
     setDelivery(batch);
     const results = await Promise.allSettled(
       batch.targets
@@ -398,6 +432,18 @@ export function AgentPanel({
                       {snapshot.pendingPanelistMessages === 1 ? 'message' : 'messages'} queued
                     </span>
                   )}
+                  {away && !preview && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={inviting}
+                      onClick={() => void inviteBack()}
+                    >
+                      {inviting ? 'Inviting…' : `Invite ${name} back`}
+                    </Button>
+                  )}
+                  {presence?.voiceEnabled === false && <span>Voice off</span>}
                   <span className="agent-status">
                     <i aria-hidden="true" />
                     {status}
@@ -421,7 +467,13 @@ export function AgentPanel({
                         <MessageScrollerItem messageId={`${id}-empty`} className="empty-item">
                           <div className="agent-empty">
                             <div className="empty-title">
-                              {id === 'a' ? (
+                              {hangout ? (
+                                <>
+                                  Pull up
+                                  <br />
+                                  a chair.
+                                </>
+                              ) : id === 'a' ? (
                                 <>
                                   A little
                                   <br />
@@ -451,6 +503,8 @@ export function AgentPanel({
                                       'Configure this agent to start a conversation.'}
                                   </p>
                                 </>
+                              ) : away ? (
+                                <p>{name} stepped out. Invite them back to rejoin the room.</p>
                               ) : agent.connection !== 'connected' ? (
                                 <>
                                   <p>Connection interrupted.</p>
@@ -459,7 +513,11 @@ export function AgentPanel({
                               ) : (
                                 <>
                                   <p>{name} is ready when you are.</p>
-                                  <p>Write below. Only agent replies appear here.</p>
+                                  <p>
+                                    {hangout
+                                      ? 'Say hello to the room, or open a whisper to talk one on one.'
+                                      : 'Write below. Only agent replies appear here.'}
+                                  </p>
                                 </>
                               )}
                               {!preview && (apiError || agent.connection === 'disconnected') && (
@@ -557,10 +615,12 @@ export function AgentPanel({
               <SideConversation
                 runId={runId}
                 seat={id}
-                name={accessibleName}
+                name={hangout ? name : accessibleName}
+                hangout={hangout}
                 snapshot={agent.side}
                 connection={agent.connection}
                 disabled={preview}
+                away={away}
                 error={agent.sideError}
                 reconnect={reconnect}
                 transfer={(text) => {
@@ -623,8 +683,16 @@ export function AgentPanel({
               <InputGroup className="composer-input">
                 <InputGroupTextarea
                   ref={input}
-                  aria-label={`Message ${accessibleName}`}
-                  placeholder={preview ? 'Preview mode' : `Talk to ${name}…`}
+                  aria-label={
+                    hangout ? `Message everyone from ${name}’s panel` : `Message ${accessibleName}`
+                  }
+                  placeholder={
+                    preview
+                      ? 'Preview mode'
+                      : hangout && destination === 'both'
+                        ? 'Talk to the room…'
+                        : `Talk to ${name}…`
+                  }
                   value={draft}
                   disabled={preview || !runId}
                   onChange={(event) => setDraft(event.target.value)}
@@ -641,28 +709,32 @@ export function AgentPanel({
                   }}
                 />
                 <InputGroupAddon align="block-end" className="composer-actions">
-                  <fieldset className="destination" disabled={submitting || preview}>
-                    <legend className="sr-only">Send destination for {accessibleName}</legend>
-                    <label>
-                      <input
-                        type="radio"
-                        aria-label={accessibleName}
-                        name={`${id}-destination`}
-                        checked={destination === 'self'}
-                        onChange={() => setDestination('self')}
-                      />
-                      <span>{name}</span>
-                    </label>
-                    <label>
-                      <input
-                        type="radio"
-                        name={`${id}-destination`}
-                        checked={destination === 'both'}
-                        onChange={() => setDestination('both')}
-                      />
-                      <span>Both</span>
-                    </label>
-                  </fieldset>
+                  {hangout ? (
+                    <span className="text-xs text-muted-foreground">To everyone</span>
+                  ) : (
+                    <fieldset className="destination" disabled={submitting || preview}>
+                      <legend className="sr-only">Send destination for {accessibleName}</legend>
+                      <label>
+                        <input
+                          type="radio"
+                          aria-label={accessibleName}
+                          name={`${id}-destination`}
+                          checked={destination === 'self'}
+                          onChange={() => setDestination('self')}
+                        />
+                        <span>{name}</span>
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name={`${id}-destination`}
+                          checked={destination === 'both'}
+                          onChange={() => setDestination('both')}
+                        />
+                        <span>Both</span>
+                      </label>
+                    </fieldset>
+                  )}
                   {(working || pendingMessages.length > 0) && (
                     <InputGroupButton
                       className="send-button stop-button"
@@ -679,7 +751,11 @@ export function AgentPanel({
                       className="send-button"
                       type="submit"
                       disabled={!draft.trim() || !available || preview || submitting}
-                      aria-label={`${sendLabel} to ${destination === 'both' ? `both agents from seat ${seat}` : accessibleName}`}
+                      aria-label={
+                        hangout
+                          ? `${sendLabel} to the room from seat ${seat}`
+                          : `${sendLabel} to ${destination === 'both' ? `both agents from seat ${seat}` : accessibleName}`
+                      }
                     >
                       {submitting ? <LoaderCircle className="spin" /> : <ArrowUpRight />}
                       <span>
@@ -697,7 +773,15 @@ export function AgentPanel({
                   : intent === 'queue' && busyTargets
                     ? 'Saved immediately. Starts after the current reply.'
                     : destination === 'both'
-                      ? 'One message. Two independent replies.'
+                      ? hangout
+                        ? !presenceReady
+                          ? 'Checking who is here…'
+                          : targets.length === 0
+                            ? 'The room is empty. Invite someone back to chat.'
+                            : targets.length === 1
+                              ? `Room message · ${modelPanelName(agents[targets[0]].info?.model, targets[0])} is here.`
+                              : 'Sid, Astra, and Fable share this conversation.'
+                        : 'One message. Two independent replies.'
                       : 'Your prompt goes to the selected agent.'}
               </span>
               <span>↵ send</span>

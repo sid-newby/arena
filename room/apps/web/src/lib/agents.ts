@@ -1,3 +1,4 @@
+import { modelName } from '../../../api/src/runs/participant-name.ts';
 import type { Narration } from './speech-queue';
 import { parseHumanMessages, type MessageReceipt } from './messaging.ts';
 import { DEBATE_SEATS, type SeatId, type ProviderId } from '../../../api/src/runs/run.contract.ts';
@@ -34,18 +35,9 @@ export type PanelistDelivery = {
 export function panelistName(agent: AgentId): string {
   return agent === 'a' ? 'A' : 'B';
 }
-const modelNames = [
-  { pattern: /^(?:claude-)?opus(?:-\d+)+(?:-(?:latest|preview))?$/i, name: 'Opus' },
-  { pattern: /^(?:claude-)?sonnet(?:-\d+)+(?:-(?:latest|preview))?$/i, name: 'Sonnet' },
-  { pattern: /^(?:claude-)?haiku(?:-\d+)+(?:-(?:latest|preview))?$/i, name: 'Haiku' },
-  { pattern: /^gpt-\d+(?:\.\d+)*-sol(?:-[a-z0-9]+)*$/i, name: 'Sol' },
-  { pattern: /^gpt-\d+(?:\.\d+)*-luna(?:-[a-z0-9]+)*$/i, name: 'Luna' },
-  { pattern: /^gpt-\d+(?:\.\d+)*-astra(?:-[a-z0-9]+)*$/i, name: 'Astra' },
-  { pattern: /^gpt-\d+(?:\.\d+)*-terra(?:-[a-z0-9]+)*$/i, name: 'Terra' },
-];
 export function modelPanelName(model: string | undefined, seat: AgentId): string {
   if (!model?.trim()) return panelistName(seat);
-  return modelNames.find(({ pattern }) => pattern.test(model.trim()))?.name ?? model;
+  return modelName(model);
 }
 export function panelistDeliveryLabel(delivery: PanelistDelivery): string {
   const name = panelistName(delivery.recipient);
@@ -81,6 +73,7 @@ export type Reply = {
   delivery?: PanelistDelivery;
 };
 export type Snapshot = ExpressionSnapshot & {
+  hangoutPresence?: { present: boolean; voiceEnabled: boolean };
   humanMessages: MessageReceipt[];
   runId?: string;
   revision?: number;
@@ -171,7 +164,8 @@ function validDelivery(value: unknown): boolean {
 function validNarration(value: unknown): boolean {
   return (
     record(value) &&
-    ((value.status === 'unavailable' && typeof value.reason === 'string') ||
+    (value.status === 'quiet' ||
+      (value.status === 'unavailable' && typeof value.reason === 'string') ||
       (value.status === 'ready' &&
         typeof value.revision === 'string' &&
         /^[a-f0-9]{64}$/.test(value.revision) &&
@@ -207,6 +201,10 @@ export function parseSnapshot(
     !['left', 'front', 'right'].includes(String(value.pose)) ||
     (value.error !== undefined && typeof value.error !== 'string') ||
     (value.sessionNotice !== undefined && typeof value.sessionNotice !== 'string') ||
+    (value.hangoutPresence !== undefined &&
+      (!record(value.hangoutPresence) ||
+        typeof value.hangoutPresence.present !== 'boolean' ||
+        typeof value.hangoutPresence.voiceEnabled !== 'boolean')) ||
     (value.activeSource !== undefined &&
       value.activeSource !== 'human' &&
       value.activeSource !== 'panelist') ||

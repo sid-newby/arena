@@ -3,6 +3,7 @@ import type { AgentId } from './agents.ts';
 export type Speaker = AgentId;
 export type Narration =
   | { status: 'ready'; revision: string; segments: string[] }
+  | { status: 'quiet' }
   | { status: 'unavailable'; reason: string };
 export type SpeechReply = {
   id: string;
@@ -76,6 +77,7 @@ export class SpeechTracker {
       state.text = reply.text;
       if (reply.status !== 'completed') continue;
       state.blocked = true;
+      if (reply.narration?.status === 'quiet') continue;
       if (!reply.narration || reply.narration.status !== 'ready') {
         this.notice = `Agent ${agent.toUpperCase()}: ${reply.narration?.reason ?? 'No spoken summary was provided.'} Reply was not spoken.`;
         continue;
@@ -99,6 +101,7 @@ export class SpeechTracker {
 export class SpeechQueue {
   private queue: SpeechSegment[] = [];
   private controller?: AbortController;
+  private speaker?: Speaker;
   private sources = new Set<AudioBufferSourceNode>();
   private generation = 0;
   private running = false;
@@ -138,7 +141,16 @@ export class SpeechQueue {
     this.queue.push(...segments);
     void this.pump();
   }
+  silence(agent: Speaker) {
+    const remaining = this.queue.filter((segment) => segment.agent !== agent);
+    if (this.speaker === agent) {
+      this.stop();
+      this.state('Waiting for new replies', false);
+    }
+    this.queue = remaining;
+  }
   stop() {
+    this.speaker = undefined;
     this.generation++;
     this.queue = [];
     this.controller?.abort();
@@ -165,6 +177,7 @@ export class SpeechQueue {
     try {
       while (this.queue.length && generation === this.generation) {
         const segment = this.queue.shift()!;
+        this.speaker = segment.agent;
         this.state(`Speaking ${segment.agent === 'a' ? 'A' : 'B'}`, true);
         if (this.context.state !== 'running')
           throw new Error('Audio playback was suspended. Enable speech again.');
@@ -296,6 +309,7 @@ export class SpeechQueue {
         this.error(cause instanceof Error ? cause.message : 'Speech failed.');
       }
     } finally {
+      this.speaker = undefined;
       this.running = false;
       if (this.queue.length) void this.pump();
     }

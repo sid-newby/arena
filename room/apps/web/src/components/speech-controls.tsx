@@ -7,9 +7,11 @@ import './speech-controls.css';
 export function SpeechControls({
   speech,
   preview,
+  hangout,
 }: {
   speech: ReturnType<typeof useSpeech>;
   preview: boolean;
+  hangout: boolean;
 }) {
   return (
     <div className="speech-controls" aria-label="Cartesia speech playback">
@@ -37,12 +39,34 @@ export function SpeechControls({
         >
           <Square /> Stop audio
         </Button>
+        {hangout &&
+          agentIds.map((agent) => (
+            <Button
+              key={agent}
+              size="sm"
+              variant="ghost"
+              aria-pressed={speech.muted[agent]}
+              disabled={speech.starting || speech.testing}
+              onClick={() => speech.toggleMute(agent)}
+            >
+              {speech.muted[agent] ? <VolumeX /> : <Volume2 />}
+              {speech.muted[agent] ? 'Unmute' : 'Mute'} {agent === 'a' ? 'Astra' : 'Fable'}
+            </Button>
+          ))}
         {agentIds.map((agent) => (
           <Button
             key={agent}
             size="sm"
             variant="ghost"
-            disabled={!speech.ready || speech.starting || speech.busy || speech.testing || preview}
+            disabled={
+              !speech.ready ||
+              speech.muted[agent] ||
+              !speech.voiceEnabled[agent] ||
+              speech.starting ||
+              speech.busy ||
+              speech.testing ||
+              preview
+            }
             onClick={() => void speech.test(agent)}
           >
             Test {agent === 'a' ? 'A' : 'B'} voice

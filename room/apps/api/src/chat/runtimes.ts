@@ -29,7 +29,11 @@ export async function runAnthropic(
   selection: ProviderConfig,
   role: ParticipantRole,
 ) {
-  const definitions = context.tools ?? runtimeTools(role);
+  const side = context.mode === 'side';
+  const definitions = side
+    ? (context.tools ?? []).filter((definition) => definition.name === 'recall_room')
+    : (context.tools ?? runtimeTools(role));
+  const allowedRoomTools = definitions.map((definition) => `mcp__room__${definition.name}`);
   const server = createSdkMcpServer({
     name: 'room',
     version: '2.0.0',
@@ -75,23 +79,23 @@ export async function runAnthropic(
       resume: context.session,
 
       includePartialMessages: true,
-      tools: context.mode === 'side' ? [] : ['WebSearch', 'WebFetch'],
-      mcpServers:
-        context.mode === 'side'
-          ? {}
-          : { room: server, context7: { type: 'http', url: 'https://mcp.context7.com/mcp' } },
+      tools: side ? [] : ['WebSearch', 'WebFetch'],
+      mcpServers: side
+        ? definitions.length
+          ? { room: server }
+          : {}
+        : { room: server, context7: { type: 'http', url: 'https://mcp.context7.com/mcp' } },
       strictMcpConfig: true,
       settingSources: [],
-      allowedTools:
-        context.mode === 'side'
-          ? []
-          : [
-              ...definitions.map((definition) => `mcp__room__${definition.name}`),
-              'WebSearch',
-              'WebFetch',
-              'mcp__context7__resolve-library-id',
-              'mcp__context7__query-docs',
-            ],
+      allowedTools: side
+        ? allowedRoomTools
+        : [
+            ...allowedRoomTools,
+            'WebSearch',
+            'WebFetch',
+            'mcp__context7__resolve-library-id',
+            'mcp__context7__query-docs',
+          ],
       permissionMode: 'dontAsk',
       canUseTool: async () => ({
         behavior: 'deny',

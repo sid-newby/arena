@@ -11,6 +11,7 @@ import {
   Query,
   Sse,
 } from '@nestjs/common';
+import { HANGOUT_ID } from '../memory/room-memory.js';
 import { ChatService } from '../chat/chat.service.js';
 
 @Controller('runs')
@@ -18,11 +19,34 @@ export class RunController {
   constructor(@Inject(ChatService) private readonly chat: ChatService) {}
   @Get()
   list() {
-    return this.chat.listRuns();
+    const { runs, currentRunId } = this.chat.listRuns();
+    return { runs: runs.filter((run) => run.id !== HANGOUT_ID), currentRunId };
+  }
+  @Post('hangout/memory/search')
+  @HttpCode(200)
+  searchMemory(@Body() body: unknown) {
+    return this.chat.searchHangoutMemory(body);
+  }
+  @Get('hangout/presence')
+  presence() {
+    return this.chat.hangoutPresence();
+  }
+  @Post('hangout/invite/:seat')
+  @HttpCode(200)
+  invite(@Param('seat') seat: string) {
+    return this.chat.inviteHangout(this.chat.agent(seat));
+  }
+  @Get('hangout/memory')
+  memoryStatus() {
+    return this.chat.hangoutMemoryStatus();
   }
   @Get('current')
   current() {
     return this.chat.currentRun();
+  }
+  @Get('hangout')
+  hangout() {
+    return this.chat.hangout();
   }
   @Post()
   create() {

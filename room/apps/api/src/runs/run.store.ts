@@ -1,3 +1,5 @@
+import { HANGOUT_ID, RoomMemory, type PrivateClientFactory } from '../memory/room-memory.js';
+import type { HonchoClient } from '../memory/honcho-client.js';
 import { ReportRepository } from '../reports/report.repository.js';
 import { parseProviderConfig } from './provider-config.js';
 import { StateStore } from '../state/state.store.js';
@@ -20,6 +22,14 @@ type Row = Record<string, SQLOutputValue>;
 type Transaction = <T>(action: () => T) => T;
 
 export class RunStore {
+  memory?: RoomMemory;
+  enableMemory(
+    client: Pick<HonchoClient, 'append' | 'searchMessages'>,
+    privateFactory?: PrivateClientFactory,
+  ) {
+    this.memory ??= new RoomMemory(this.db, client, privateFactory);
+    this.memory.wake();
+  }
   readonly workflows: WorkflowStore;
   readonly state: StateStore;
   readonly reports: ReportRepository;
@@ -108,16 +118,30 @@ export class RunStore {
       maestro: parseProviderConfig(value.maestro),
     };
   }
-  create(kind: RunSnapshot['kind'] = 'ordinary', id: string = randomUUID()): RunSnapshot {
+  ensureHangout(): RunSnapshot {
+    return this.transaction(() => {
+      if (this.db.prepare('SELECT id FROM runs WHERE id=?').get(HANGOUT_ID))
+        return this.get(HANGOUT_ID);
+      return this.create('ordinary', HANGOUT_ID, {
+        ...DEFAULT_MODELS,
+        a: { provider: 'codex', model: 'gpt-6-astra', effort: 'high' },
+        b: { provider: 'anthropic', model: 'claude-fable-5-1', effort: 'high' },
+      });
+    });
+  }
+  create(
+    kind: RunSnapshot['kind'] = 'ordinary',
+    id: string = randomUUID(),
+    models: Record<ParticipantRole, ProviderConfig> = DEFAULT_MODELS,
+  ): RunSnapshot {
     return this.transaction(() => {
       this.db
         .prepare('INSERT INTO runs VALUES (?,?,?,?,?)')
         .run(id, kind, kind === 'legacy' ? 'retained' : 'ready', 1, Date.now());
       this.db
         .prepare('INSERT INTO run_configurations VALUES (?,?,?)')
-        .run(id, 1, JSON.stringify(DEFAULT_MODELS));
-      for (const role of [...DEBATE_SEATS, 'maestro'] as const)
-        this.assign(id, role, DEFAULT_MODELS[role]);
+        .run(id, 1, JSON.stringify(models));
+      for (const role of [...DEBATE_SEATS, 'maestro'] as const) this.assign(id, role, models[role]);
       this.append(id, 'run.created', null, null, { kind, revision: 1 });
       return this.get(id);
     });
@@ -164,6 +188,8 @@ export class RunStore {
     });
   }
   select(id: string) {
+    if (id === HANGOUT_ID)
+      throw new ConflictException('The hangout opens separately from debate runs.');
     const run = this.get(id);
     this.db.prepare('UPDATE room_state SET current_run=? WHERE id=1').run(id);
     return run;
@@ -257,6 +283,8 @@ export class RunStore {
     busy: () => boolean,
   ): RunSnapshot {
     return this.transaction(() => {
+      if (runId === HANGOUT_ID)
+        throw new ConflictException('This hangout belongs to Sid, Astra, and Fable.');
       const run = this.get(runId);
       if (run.kind === 'legacy' || run.state === 'retained')
         throw new ConflictException('Retained runs are read-only.');
@@ -346,11 +374,21 @@ export class RunStore {
     payload: Record<string, unknown>,
   ) {
     this.transaction(() => {
-      this.db
+      const createdAt = Date.now();
+      const inserted = this.db
         .prepare(
           'INSERT INTO correspondence(run_id,kind,role,turn_id,payload,created_at) VALUES (?,?,?,?,?,?)',
         )
-        .run(runId, kind, role, turnId, JSON.stringify(payload), Date.now());
+        .run(runId, kind, role, turnId, JSON.stringify(payload), createdAt);
+      this.memory?.record({
+        seq: Number(inserted.lastInsertRowid),
+        runId,
+        kind,
+        role,
+        turnId,
+        payload,
+        createdAt,
+      });
       this.changed(runId);
     });
   }

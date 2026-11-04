@@ -11,7 +11,7 @@ import {
   type AgentInfo,
   type Snapshot,
 } from '@/lib/agents';
-import { assertSendScope, CatalogRefresh, type SendScope } from '@/lib/run-scope';
+import { assertSendScope, CatalogRefresh, type DeliveryBatch } from '@/lib/run-scope';
 import { ExpressionClock } from '@/lib/panel-expression';
 import {
   parseMessageReceipt,
@@ -53,7 +53,7 @@ async function stopRun(runId: string, signal: AbortSignal) {
   }
 }
 
-export function useAgents() {
+export function useAgents(mode: 'hangout' | 'debate') {
   const [agents, setAgents] = useState<Room>({ a: initialAgent, b: initialAgent });
   const [generation, setGeneration] = useState(0);
   const [apiError, setApiError] = useState<string>();
@@ -75,7 +75,11 @@ export function useAgents() {
     let catalogRefresh: CatalogRefresh | undefined;
     async function connect() {
       try {
-        const run = await api('/api/runs/current', parseRunReference, { signal: abort.signal });
+        const run = await api(
+          mode === 'hangout' ? '/api/runs/hangout' : '/api/runs/current',
+          parseRunReference,
+          { signal: abort.signal },
+        );
         if (abort.signal.aborted) return;
         activeScope.current = { run, abort, generation };
         setRunId(run.id);
@@ -211,13 +215,13 @@ export function useAgents() {
       if (activeScope.current?.abort === abort) activeScope.current = undefined;
       subscriptions.forEach((unsubscribe) => unsubscribe());
     };
-  }, [generation, update]);
+  }, [generation, mode, update]);
 
   async function send(
     id: AgentId,
     text: string,
     requestId: string,
-    requested: SendScope,
+    requested: DeliveryBatch,
     intent: MessageIntent = 'queue',
   ) {
     const scope = activeScope.current;
@@ -246,6 +250,9 @@ export function useAgents() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             requestId,
+            ...(mode === 'hangout' || requested.targets.length > 1
+              ? { broadcastId: requested.requestId }
+              : {}),
             text,
             expectedRevision: requested.revision,
             intent,

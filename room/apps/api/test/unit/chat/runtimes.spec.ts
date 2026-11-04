@@ -1,5 +1,7 @@
 import type { TurnContext } from '../../../src/chat/chat.types.js';
 import type { SdkMcpToolDefinition, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { recallTool } from '../../../src/memory/room-memory.js';
+import { hangoutInstructions } from '../../../src/chat/runtime-tools.js';
 import { DEFAULT_MODELS } from '../../../src/runs/run.contract.js';
 
 const fake = vi.hoisted(() => ({
@@ -114,6 +116,42 @@ it('supports Anthropic in either seat while preserving stable identities', async
     effort: 'high',
   });
   await runtime.run(context());
+});
+
+it('sends Fable the hangout identities in the Claude system prompt', async () => {
+  session();
+  const instructions = hangoutInstructions('b', 'Fable', 'Astra');
+  await createRuntimes('/tmp').b.run({ ...context(), instructions });
+  expect(instructions).toContain('You are Fable in seat B');
+  expect(instructions).toContain('Astra is in seat A');
+  expect(instructions).not.toMatch(/debate|opponent|competition/i);
+  expect(fake.query).toHaveBeenCalledWith(
+    expect.objectContaining({ options: expect.objectContaining({ systemPrompt: instructions }) }),
+  );
+});
+
+it('makes private recall the only tool available to the Claude whisper session', async () => {
+  session();
+  const turn = context();
+  await runAnthropic(
+    { ...turn, mode: 'side', tools: [recallTool, { ...recallTool, name: 'address_panelist' }] },
+    '/tmp',
+    DEFAULT_MODELS.b,
+    'b',
+  );
+  const server = fake.createServer.mock.calls[0][0] as { tools: SdkMcpToolDefinition[] };
+  expect(server.tools.map((definition) => definition.name)).toEqual(['recall_room']);
+  expect(fake.query).toHaveBeenCalledWith(
+    expect.objectContaining({
+      options: expect.objectContaining({
+        tools: [],
+        allowedTools: ['mcp__room__recall_room'],
+        mcpServers: { room: { type: 'sdk', name: 'room' } },
+      }),
+    }),
+  );
+  await server.tools[0].handler({ query: 'Earlier whisper?' }, {});
+  expect(turn.tool).toHaveBeenCalledWith('recall_room', { query: 'Earlier whisper?' });
 });
 
 it('gives Maestro no panel, expression, peer, or default workspace tools', async () => {
