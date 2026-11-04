@@ -107,6 +107,30 @@ export function wordCount(transcript: string): number {
   return transcript.trim().split(/\s+/).filter(Boolean).length;
 }
 
+function words(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+function bigrams(tokens: string[]): Set<string> {
+  const set = new Set<string>();
+  for (let i = 0; i + 1 < tokens.length; i++) set.add(`${tokens[i]} ${tokens[i + 1]}`);
+  return set;
+}
+
+export function looksLikeEcho(transcript: string, spoken: string[]): boolean {
+  const heard = words(transcript);
+  if (heard.length < 2) return false;
+  const heardPairs = bigrams(heard);
+  const spokenPairs = bigrams(spoken.flatMap(words));
+  if (!spokenPairs.size) return false;
+  let matched = 0;
+  for (const pair of heardPairs) if (spokenPairs.has(pair)) matched += 1;
+  return matched / heardPairs.size >= 0.6;
+}
+
 export const PCM_CAPTURE_WORKLET = `
 class PcmCapture extends AudioWorkletProcessor {
   process(inputs) {

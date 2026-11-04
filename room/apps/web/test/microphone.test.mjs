@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   PcmChunker,
   listenSocketUrl,
+  looksLikeEcho,
   parseListenEvent,
   resample,
   toPcm16,
@@ -62,4 +63,13 @@ test('the listening socket follows the page origin', () => {
     'ws://127.0.0.1:58241/api/speech/listen',
   );
   assert.equal(listenSocketUrl({ protocol: 'https:', host: 'x' }), 'wss://x/api/speech/listen');
+});
+
+test('a transcript that repeats what the room just said is treated as echo', () => {
+  const spoken = ['Both seats got it in one piece, call that a pass.'];
+  assert.equal(looksLikeEcho('both seats got it in one piece', spoken), true);
+  assert.equal(looksLikeEcho('Call that a pass, Fable.', spoken), true);
+  assert.equal(looksLikeEcho('Hey Fable, can you check the microphone?', spoken), false);
+  assert.equal(looksLikeEcho('pass', spoken), false);
+  assert.equal(looksLikeEcho('both seats', []), false);
 });

@@ -51,6 +51,14 @@ export default function App() {
     onSpeech: () => {
       if (speech.busy) speech.stop();
     },
+    playing: () => speech.busy,
+    spoken: () =>
+      agentIds.flatMap((id) =>
+        room.agents[id].snapshot.messages
+          .slice(-3)
+          .map((reply) => reply.speechSummary ?? '')
+          .filter(Boolean),
+      ),
     onTranscript: (text) => {
       voiceQueue.current = voiceQueue.current
         .then(() => deliverTranscript(text))

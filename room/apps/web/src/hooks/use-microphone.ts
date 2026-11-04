@@ -5,6 +5,7 @@ import {
   PcmChunker,
   PCM_CAPTURE_WORKLET,
   LISTEN_RATE,
+  looksLikeEcho,
   resample,
   toPcm16,
   transcriptReady,
@@ -18,11 +19,14 @@ type Capture = {
   chunker: PcmChunker;
   closed: boolean;
   attempts: number;
+  turnDuringPlayback: boolean;
 };
 
 export type MicrophoneCallbacks = {
   onTranscript: (text: string) => void;
   onSpeech?: () => void;
+  playing?: () => boolean;
+  spoken?: () => string[];
 };
 
 export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) {
@@ -114,19 +118,32 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
           setStatus('Listening · speak any time');
           return;
         case 'turn.start':
+          current.turnDuringPlayback = latest.current.playing?.() ?? false;
           setListening(true);
           setInterim('');
           setStatus('Hearing you…');
           return;
-        case 'turn.update':
+        case 'turn.update': {
           setListening(true);
           setInterim(event.transcript);
-          if (wordCount(event.transcript) >= 1) latest.current.onSpeech?.();
+          const echo =
+            current.turnDuringPlayback &&
+            looksLikeEcho(event.transcript, latest.current.spoken?.() ?? []);
+          if (!echo && wordCount(event.transcript) >= 2) latest.current.onSpeech?.();
           return;
+        }
         case 'turn.end': {
           setListening(false);
           setInterim('');
           const text = transcriptReady(event.transcript);
+          if (
+            text &&
+            current.turnDuringPlayback &&
+            looksLikeEcho(text, latest.current.spoken?.() ?? [])
+          ) {
+            setStatus('Ignored playback echo · listening');
+            return;
+          }
           if (text) {
             setStatus('Sent · listening');
             latest.current.onTranscript(text);
@@ -191,6 +208,7 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
         chunker: new PcmChunker(LISTEN_RATE),
         closed: false,
         attempts: 0,
+        turnDuringPlayback: false,
       };
       const node = new AudioWorkletNode(context, 'pcm-capture', {
         numberOfInputs: 1,

@@ -138,7 +138,9 @@ interrupt intent, like a typed message. With **Everyone** selected it goes to ev
 present seat as Sid's message. With **Whisper Astra** or **Whisper Fable**
 selected it goes to that seat's private side conversation, which is never
 spoken aloud. If a reply is playing when Sid starts talking, playback stops
-so the seats do not talk over him.
+so the seats do not talk over him. A turn that begins during playback and
+mostly repeats the seats' recent spoken summaries is treated as speaker echo:
+it neither interrupts playback nor sends, and the band says it was ignored.
 
 The server caps audio frames at 64 KB, allows two microphones at once, and
 tells the browser when Cartesia closes the turn socket so it can reconnect.
