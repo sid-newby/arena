@@ -280,19 +280,6 @@ export function useAgents(mode: 'hangout' | 'debate') {
       throw new Error('Could not cancel this message. Its delivery may have started.');
   }
 
-  async function stop(id: AgentId) {
-    const scope = activeScope.current;
-    if (!scope) throw new Error('Wait for the run to connect.');
-    const response = await fetch(
-      `/api/runs/${encodeURIComponent(scope.run.id)}/agents/${id}/turns/current`,
-      {
-        method: 'DELETE',
-        signal: AbortSignal.any([scope.abort.signal, AbortSignal.timeout(15000)]),
-      },
-    );
-    if (!response.ok) throw new Error(`Could not stop ${id}. Try again.`);
-  }
-
   async function stopConversation() {
     const scope = activeScope.current;
     if (!scope) throw new Error('Wait for the run to connect.');
@@ -313,5 +300,5 @@ export function useAgents(mode: 'hangout' | 'debate') {
     return () => window.removeEventListener('lilbits-run-changed', reconnect);
   }, [reconnect]);
 
-  return { runId, agents, apiError, send, stop, cancelMessage, stopConversation, reconnect };
+  return { runId, agents, apiError, send, cancelMessage, stopConversation, reconnect };
 }

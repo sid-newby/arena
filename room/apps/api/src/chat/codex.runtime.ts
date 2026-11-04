@@ -91,7 +91,7 @@ export async function runCodex(
   };
   const abort = () => {
     if (!startingTurn) {
-      rejectCompletion(new Error('Reply stopped.'));
+      client.close();
       return;
     }
     interrupt();

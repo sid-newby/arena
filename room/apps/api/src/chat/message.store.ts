@@ -50,7 +50,7 @@ export class SeatMessageStore {
         .prepare("SELECT id,run_id FROM human_messages WHERE status IN ('dispatching','running')")
         .all()) {
         db.prepare("UPDATE human_messages SET status='uncertain',error=? WHERE id=?").run(
-          'The server restarted after dispatch. Review this delivery before cancelling it to continue the queue.',
+          'The server restarted after dispatch. This message was not replayed.',
           row.id,
         );
         this.event(String(row.run_id), 'message.uncertain', { messageId: String(row.id) });
@@ -60,7 +60,7 @@ export class SeatMessageStore {
   list(runId: string, seat: SeatId) {
     return this.db
       .prepare(
-        "SELECT * FROM human_messages WHERE run_id=? AND seat=? AND (status IN ('queued','dispatching','running','uncertain') OR id IN (SELECT id FROM human_messages WHERE run_id=? AND seat=? ORDER BY rowid DESC LIMIT 100)) ORDER BY created_at,rowid",
+        "SELECT * FROM human_messages WHERE run_id=? AND seat=? AND (status IN ('queued','dispatching','running') OR id IN (SELECT id FROM human_messages WHERE run_id=? AND seat=? ORDER BY rowid DESC LIMIT 100)) ORDER BY created_at,rowid",
       )
       .all(runId, seat, runId, seat)
       .map(receipt);
@@ -129,31 +129,22 @@ export class SeatMessageStore {
       });
     });
   }
-  hasScheduledDelivery(runId: string) {
-    return Boolean(
-      this.db
-        .prepare(
-          "SELECT 1 FROM human_messages WHERE run_id=? AND status IN ('queued','dispatching','running') LIMIT 1",
-        )
-        .get(runId),
-    );
-  }
   pending(runId: string, seat?: SeatId) {
     const sql =
-      "SELECT COUNT(*) AS n FROM human_messages WHERE run_id=? AND status IN ('queued','dispatching','running','uncertain')";
-    return (
-      Number(
-        (seat
-          ? this.db.prepare(sql + ' AND seat=?').get(runId, seat)
-          : this.db.prepare(sql).get(runId)
-        )?.n,
-      ) > 0
+      "SELECT 1 FROM human_messages WHERE run_id=? AND status IN ('queued','dispatching','running')";
+    return Boolean(
+      seat
+        ? this.db.prepare(sql + ' AND seat=? LIMIT 1').get(runId, seat)
+        : this.db.prepare(sql + ' LIMIT 1').get(runId),
     );
   }
   next(runId: string, seat: SeatId) {
-    const messages = this.list(runId, seat);
-    if (messages.some((message) => message.status === 'uncertain')) return undefined;
-    return messages.find((message) => message.status === 'queued');
+    const row = this.db
+      .prepare(
+        "SELECT * FROM human_messages WHERE run_id=? AND seat=? AND status='queued' ORDER BY (intent='interrupt') DESC,created_at,rowid LIMIT 1",
+      )
+      .get(runId, seat);
+    return row ? receipt(row) : undefined;
   }
   dispatchRevision(id: string) {
     return Number(

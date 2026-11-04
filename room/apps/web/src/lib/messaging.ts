@@ -176,9 +176,6 @@ export function receiptLabel(status: MessageStatus): string {
 
 export function messagePending(message: MessageReceipt): boolean {
   return (
-    message.status === 'queued' ||
-    message.status === 'dispatching' ||
-    message.status === 'running' ||
-    message.status === 'uncertain'
+    message.status === 'queued' || message.status === 'dispatching' || message.status === 'running'
   );
 }

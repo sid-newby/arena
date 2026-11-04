@@ -111,7 +111,10 @@ export async function runAnthropic(
     terminalSeen = false;
   let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
   const abort = () => {
-    if (!authorizedToSend) return;
+    if (!authorizedToSend) {
+      session.close();
+      return;
+    }
     void session.interrupt().catch(() => session.close());
     cancellationTimer = setTimeout(() => session.close(), 5000);
   };

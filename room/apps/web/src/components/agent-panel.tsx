@@ -1,13 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import {
-  ArrowUpRight,
-  Check,
-  Copy,
-  LoaderCircle,
-  Maximize2,
-  Minimize2,
-  Square,
-} from 'lucide-react';
+import { ArrowUpRight, Check, Copy, LoaderCircle, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Bubble, BubbleContent } from '@/components/ui/bubble';
 import {
@@ -63,7 +55,6 @@ type Props = {
     scope: DeliveryBatch,
     intent: MessageIntent,
   ) => Promise<void>;
-  stop: (id: AgentId) => Promise<void>;
   cancelMessage: (id: AgentId, messageId: string) => Promise<void>;
   effectsEnabled: boolean;
   selected: boolean;
@@ -164,7 +155,6 @@ export function AgentPanel({
   apiError,
   reconnect,
   send,
-  stop,
   cancelMessage,
   effectsEnabled,
   selected,
@@ -208,7 +198,6 @@ export function AgentPanel({
   const destination = hangout ? 'both' : debateDestination;
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const [delivery, setDelivery] = useState<DeliveryBatch>();
   const flight = useRef(false);
   const [inviting, setInviting] = useState(false);
@@ -260,9 +249,7 @@ export function AgentPanel({
   const busyTargets = targets.some((target) => agents[target].snapshot.status === 'working');
   const receipts = snapshot.humanMessages ?? [];
   const pendingMessages = receipts.filter(messagePending);
-  const deliveryFeedback =
-    receipts.find((message) => message.status === 'uncertain') ?? receipts.at(-1);
-  const deliveryPaused = deliveryFeedback?.status === 'uncertain';
+  const deliveryFeedback = receipts.at(-1);
   const visibleReceipts = receipts.filter(
     (message) => messagePending(message) || receipts.slice(-3).includes(message),
   );
@@ -343,18 +330,6 @@ export function AgentPanel({
       setFullscreenError(false);
     } catch {
       setFullscreenError(true);
-    }
-  }
-
-  async function stopTurn() {
-    setStopping(true);
-    setError(undefined);
-    try {
-      await stop(id);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not stop the reply.');
-    } finally {
-      setStopping(false);
     }
   }
 
@@ -611,11 +586,9 @@ export function AgentPanel({
             {!preview && visibleReceipts.length > 0 && (
               <details className="saved-messages">
                 <summary>
-                  {deliveryPaused
-                    ? 'Delivery paused · Review unconfirmed message'
-                    : pendingMessages.length
-                      ? `${pendingMessages.length} pending message${pendingMessages.length === 1 ? '' : 's'}`
-                      : 'Recent sent messages'}
+                  {pendingMessages.length
+                    ? `${pendingMessages.length} pending message${pendingMessages.length === 1 ? '' : 's'}`
+                    : 'Recent sent messages'}
                 </summary>
                 <ol>
                   {visibleReceipts.map((message) => (
@@ -623,7 +596,7 @@ export function AgentPanel({
                       <p>{message.text}</p>
                       <div className="saved-message-state">
                         <span>{receiptLabel(message.status)}</span>
-                        {(message.status === 'queued' || message.status === 'uncertain') && (
+                        {message.status === 'queued' && (
                           <Button
                             type="button"
                             size="sm"
@@ -631,15 +604,13 @@ export function AgentPanel({
                             disabled={Boolean(cancelling)}
                             onClick={() => void cancelSavedMessage(message.id)}
                           >
-                            {cancelling === message.id
-                              ? 'Cancelling…'
-                              : message.status === 'uncertain'
-                                ? 'Cancel unconfirmed message'
-                                : 'Cancel queued message'}
+                            {cancelling === message.id ? 'Cancelling…' : 'Cancel queued message'}
                           </Button>
                         )}
                       </div>
-                      {message.error && <p className="side-error">{message.error}</p>}
+                      {message.error && message.status !== 'uncertain' && (
+                        <p className="side-error">{message.error}</p>
+                      )}
                     </li>
                   ))}
                 </ol>
@@ -647,14 +618,13 @@ export function AgentPanel({
             )}
             {!preview && deliveryFeedback && (
               <output
-                className={`saved-message-feedback${deliveryFeedback.status === 'failed' || deliveryPaused ? ' side-error' : ''}`}
+                className={`saved-message-feedback${deliveryFeedback.status === 'failed' ? ' side-error' : ''}`}
                 aria-live="polite"
               >
-                {deliveryPaused
-                  ? `Cancel the unconfirmed message to resume delivery to ${name}.`
-                  : [receiptLabel(deliveryFeedback.status), deliveryFeedback.error]
-                      .filter(Boolean)
-                      .join(' · ')}
+                {receiptLabel(deliveryFeedback.status)}
+                {deliveryFeedback.error && deliveryFeedback.status !== 'uncertain'
+                  ? ` · ${deliveryFeedback.error}`
+                  : ''}
               </output>
             )}
             <form
@@ -723,34 +693,19 @@ export function AgentPanel({
                       </label>
                     </fieldset>
                   )}
-                  {(working || pendingMessages.length > 0) && (
-                    <InputGroupButton
-                      className="send-button stop-button"
-                      onClick={() => void stopTurn()}
-                      disabled={stopping}
-                      aria-label={`Stop ${accessibleName} reply`}
-                    >
-                      <Square />
-                      {stopping ? 'Stopping' : 'Stop'}
-                    </InputGroupButton>
-                  )}
-                  {
-                    <InputGroupButton
-                      className="send-button"
-                      type="submit"
-                      disabled={!draft.trim() || !available || preview || submitting}
-                      aria-label={
-                        hangout
-                          ? `${sendLabel} to the room from seat ${seat}`
-                          : `${sendLabel} to ${destination === 'both' ? `both agents from seat ${seat}` : accessibleName}`
-                      }
-                    >
-                      {submitting ? <LoaderCircle className="spin" /> : <ArrowUpRight />}
-                      <span>
-                        {submitting ? 'Saving…' : error && delivery ? 'Retry' : sendLabel}
-                      </span>
-                    </InputGroupButton>
-                  }
+                  <InputGroupButton
+                    className="send-button"
+                    type="submit"
+                    disabled={!draft.trim() || !available || preview || submitting}
+                    aria-label={
+                      hangout
+                        ? `${sendLabel} to the room from seat ${seat}`
+                        : `${sendLabel} to ${destination === 'both' ? `both agents from seat ${seat}` : accessibleName}`
+                    }
+                  >
+                    {submitting ? <LoaderCircle className="spin" /> : <ArrowUpRight />}
+                    <span>{submitting ? 'Saving…' : error && delivery ? 'Retry' : sendLabel}</span>
+                  </InputGroupButton>
                 </InputGroupAddon>
               </InputGroup>
             </form>

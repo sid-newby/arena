@@ -308,7 +308,7 @@ Stop audio remains a separate playback action. The composer retains Send during
 all active replies. Every send interrupts: a busy seat stops its current reply
 and starts the new message, and the caption says so. A bounded
 receipt disclosure shows pending and recent messages, their authoritative delivery
-state, and cancellation for queued or unconfirmed work. Preview never sends or
+state, and cancellation of queued work. A previous unconfirmed delivery stays in history. The next message proceeds without a review step. Preview never sends or
 stops live conversation.
 The receipt disclosure starts collapsed. On narrow or short viewports, the reply
 thread retains at least 100px and the composer can scroll when receipts expand.

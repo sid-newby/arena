@@ -662,10 +662,6 @@
   width: 15px;
   height: 15px;
 }
-.composer-actions .stop-button {
-  background: var(--secondary);
-  color: var(--foreground);
-}
 .composer-caption {
   display: flex;
   justify-content: space-between;

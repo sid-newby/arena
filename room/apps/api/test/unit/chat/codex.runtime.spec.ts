@@ -75,6 +75,24 @@ describe('Codex room tool sessions', () => {
     vi.unstubAllEnvs();
   });
 
+  it('closes a stalled initialize request on interrupt before dispatch', async () => {
+    const turn = context();
+    const server = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn<() => void>(),
+    });
+    fake.spawn.mockReturnValue(server);
+    const running = runCodex(turn, workspace);
+    try {
+      turn.controller.abort();
+      expect(server.kill).toHaveBeenCalled();
+    } finally {
+      server.emit('exit', 0);
+      await expect(running).rejects.toThrow(/Codex connection closed/);
+    }
+  });
   it.each(['thread/start', 'thread/resume'] as const)(
     'sends Astra the memory guide on %s',
     async (method) => {

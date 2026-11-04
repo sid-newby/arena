@@ -35,6 +35,10 @@ test('a queued receipt is accepted without a turn id and stays separate from spo
   assert.equal(messagePending(snapshot.humanMessages[0]), true);
   assert.deepEqual(parseHumanMessages(undefined), []);
 });
+test('a past unconfirmed delivery is history and never keeps the composer pending', () => {
+  const interrupted = parseMessageReceipt({ ...receipt, status: 'uncertain' });
+  assert.equal(messagePending(interrupted), false);
+});
 test('receipts cannot cross run or seat scope and malformed delivery data is rejected', () => {
   assert.throws(() => parseMessageReceipt(receipt, 'run-two', 'a'), /unreadable/);
   assert.throws(() => parseMessageReceipt(receipt, 'run-one', 'b'), /unreadable/);

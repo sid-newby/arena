@@ -1,9 +1,9 @@
 # Messaging seats while they work
 
-The main composer stays available while a seat works. Every send, typed or
-spoken, uses the `interrupt` intent: the message is saved, the active reply is
-stopped, and the replacement starts after cancellation is acknowledged. An idle
-seat simply starts it. The API still accepts `queue` and `send` intents for
+The main composer stays available while a seat works. Typed and spoken messages
+in the public room use the `interrupt` intent. An idle seat starts the message
+immediately. For a busy seat, Arena saves the new message, requests cancellation
+of the current reply, and starts the replacement when the local turn ends. The API still accepts `queue` and `send` intents for
 other clients; the room no longer offers them.
 
 Both sends save an independent receipt for
@@ -14,18 +14,18 @@ Changing the text, destination, or delivery action creates a new request.
 ## Saved messages and stopping
 
 The receipt disclosure shows delivery state separately from agent replies.
-Cancel removes a queued message before it starts. An unconfirmed delivery can
-also be cancelled after review. Stop affects the active seat and its pending
-main queue. Stop conversation affects both main queues, side conversations,
-peer deliveries, and local audio.
+Cancel removes a queued message before it starts. If the provider never confirms
+an interruption, the old delivery ends with an unconfirmed receipt. Later
+messages can run without review. Stop conversation affects both main queues,
+side conversations, peer deliveries, and local audio.
 
 Interruption preserves partial text. Completed tool effects remain completed;
 interrupting a reply does not undo a file edit or published artifact. Partial
 stopped replies are not spoken as completed summaries.
 
 Unsent main messages survive a server restart. If work had already been
-dispatched, its receipt becomes unconfirmed and later messages wait for review.
-The server does not blindly replay that delivery. Request retries must match the
+dispatched, its receipt becomes unconfirmed. The server resumes queued messages
+and skips the previously dispatched delivery. Request retries must match the
 saved text, action, run, seat, binding, and accepted revision.
 
 Structured tasks record main-seat interventions and track the resulting turn as
@@ -61,7 +61,7 @@ All endpoints are beneath `/api/runs/:runId/agents/:seat`.
 | Request | Result |
 | --- | --- |
 | `POST /messages` with `requestId`, `text`, `expectedRevision`, and `intent` | HTTP 202 with a saved message receipt. Intent is `send`, `queue`, or `interrupt`. |
-| `DELETE /messages/:id` | Cancels a queued or unconfirmed message. Active work uses Stop. |
+| `DELETE /messages/:id` | Cancels a queued message before it starts. |
 | `GET /side-conversation` | The separate side snapshot. |
 | `POST /side-conversation` with `requestId`, `text`, and `expectedRevision` | HTTP 202 with `turnId`. |
 | `DELETE /side-conversation/turns/current` | Stops active and queued side work. |

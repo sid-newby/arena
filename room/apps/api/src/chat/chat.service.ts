@@ -63,7 +63,6 @@ export class ChatService implements OnModuleDestroy {
       controller: AbortController;
       promise: Promise<void>;
       turn: TurnRow;
-      cancellationUnconfirmed?: boolean;
     }
   >();
   private readonly humanWaiters = new Map<string, number>();
@@ -270,12 +269,7 @@ export class ChatService implements OnModuleDestroy {
   }
   private changeHangoutProject(project: ReturnType<typeof bindHangoutProject> | null) {
     this.hangout();
-    if (
-      this.executing(HANGOUT_ID) ||
-      this.store.messaging.hasScheduledDelivery(HANGOUT_ID) ||
-      this.store.side.busy(HANGOUT_ID) ||
-      this.projectCalls
-    )
+    if (this.busy(HANGOUT_ID) || this.store.side.busy(HANGOUT_ID) || this.projectCalls)
       throw new ConflictException(
         'Wait for active and queued conversations to finish before changing the project.',
       );
@@ -737,7 +731,7 @@ export class ChatService implements OnModuleDestroy {
       this.store.messaging
         .list(runId, agent)
         .filter((message) =>
-          ['queued', 'dispatching', 'running', 'uncertain'].includes(message.status),
+          ['queued', 'dispatching', 'running'].includes(message.status),
         ).length >= 64
     )
       throw new ConflictException(
@@ -776,11 +770,7 @@ export class ChatService implements OnModuleDestroy {
       this.executionPolicy?.messageDrain?.(runId) === false
     )
       return;
-    const messages = this.store.messaging.list(runId, agent);
-    if (messages.some((message) => message.status === 'uncertain')) return;
-    const message =
-      messages.find((value) => value.status === 'queued' && value.intent === 'interrupt') ??
-      this.store.messaging.next(runId, agent);
+    const message = this.store.messaging.next(runId, agent);
     if (!message) return;
     const active = this.active.get(key);
     if (active && message.intent !== 'interrupt') return;
@@ -803,12 +793,6 @@ export class ChatService implements OnModuleDestroy {
           .cancelConversation(active.turn.conversation_id, 'Sid interrupted this reply.');
         active.controller.abort();
         await active.promise;
-        if (active.cancellationUnconfirmed) {
-          this.store.messaging.update(message, 'uncertain', {
-            error: 'Cancellation was not acknowledged. Review this delivery before continuing.',
-          });
-          return;
-        }
       }
       const current = this.store.messaging.get(message.id, runId, agent);
       if (
@@ -1091,8 +1075,6 @@ export class ChatService implements OnModuleDestroy {
         if (controller.signal.aborted) {
           store.finish(id, 'stopped', performance.now() - started);
           if (error instanceof UnconfirmedCancellationError) {
-            const active = this.active.get(key);
-            if (active) active.cancellationUnconfirmed = true;
             const receipt = this.store.messaging.find(turn.run_id, agent, turn.request);
             if (receipt)
               this.store.messaging.update(receipt, 'uncertain', { error: error.message });

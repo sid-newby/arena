@@ -210,6 +210,29 @@ it('passes caller-supplied tool schemas and instructions to Claude', async () =>
   );
 });
 
+it('closes a stalled account check on interrupt before sending any prompt', async () => {
+  const turn = context();
+  let rejectAccount!: (error: Error) => void;
+  const accountInfo = vi.fn<() => Promise<never>>(
+    () =>
+      new Promise((_, reject) => {
+        rejectAccount = reject;
+      }),
+  );
+  const close = vi.fn<() => void>(() => rejectAccount(new Error('Closed before dispatch.')));
+  const interrupt = vi.fn<() => Promise<void>>();
+  fake.query.mockReturnValue({ accountInfo, close, interrupt });
+  const running = runAnthropic(turn, '/tmp', DEFAULT_MODELS.b, 'b');
+  try {
+    expect(accountInfo).toHaveBeenCalledOnce();
+    turn.controller.abort();
+    expect(close).toHaveBeenCalled();
+    expect(interrupt).not.toHaveBeenCalled();
+  } finally {
+    close();
+    await expect(running).rejects.toThrow('Closed before dispatch.');
+  }
+});
 it('refuses API-key authentication before releasing any user prompt', async () => {
   const fakeSession = session('claude-opus-5-5', {
     apiProvider: 'firstParty',

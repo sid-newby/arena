@@ -48,12 +48,11 @@ peer input. Panelist messages wait when the recipient is busy. Human messages
 always interrupt: sending to a busy seat stops its current reply before starting
 the new one, whether typed or spoken. A human-rooted exchange has
 at most four automatic handoffs. Stop conversation stops both replies and queued
-deliveries; Stop audio only controls playback. Interrupted or queued deliveries
-are reconciled visibly after restart without automatic replay. Facing the peer
+deliveries; Stop audio only controls playback. After a restart, queued messages can still run. Messages already dispatched stay in history and are never automatically replayed. Facing the peer
 changes orientation only and never sends a message.
 
 The main composer stays available during work. Saved message receipts show delivery
-state and permit cancellation of queued or unconfirmed messages. Both sends retain
+state and permit cancellation of queued messages. A missing confirmation does not hold up the seat. Both sends retain
 their original delivery intent and retry only destinations that did not acknowledge
 the request. Stop conversation cancels active work and queued main and side messages.
 

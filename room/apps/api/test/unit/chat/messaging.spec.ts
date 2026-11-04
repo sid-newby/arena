@@ -319,22 +319,28 @@ describe('Durable seat messages', () => {
       'cancelled',
     ]);
   });
-  it('blocks replacement after unconfirmed cancellation until explicit resolution', async () => {
-    send('first');
+  it('starts the replacement after local cancellation settles without replay or review', async () => {
+    const first = send('first');
     await settle();
     uncertain = true;
+    holdCancellation = true;
     const correction = send('correction', 'interrupt');
     await settle();
     expect(runs).toHaveLength(1);
-    expect(store.messaging.get(correction.id, runId, 'a').status).toBe('uncertain');
-    send('later');
+    expect(runs[0].context.controller.signal.aborted).toBe(true);
+    runs[0].release();
     await settle();
-    expect(runs).toHaveLength(1);
-    for (const message of store.messaging.list(runId, 'a'))
-      if (message.status === 'uncertain') chat.cancelMessage('a', runId, message.id);
-    await settle();
+    expect(store.messaging.get(first.id, runId, 'a').status).toBe('uncertain');
     expect(runs).toHaveLength(2);
-    expect(runs[1].context.text).toBe('later');
+    expect(runs[1].context.text).toBe('correction');
+    expect(send('correction', 'interrupt').id).toBe(correction.id);
+    runs[1].release();
+    await settle();
+    expect(chat.busy(runId)).toBe(false);
+    send('later', 'send');
+    await settle();
+    expect(runs.map((run) => run.context.text)).toEqual(['first', 'correction', 'later']);
+    holdCancellation = false;
   });
   it('stopping A cannot strand an interrupt waiting on B cancellation', async () => {
     chat.submitMessage(
@@ -625,7 +631,7 @@ describe('Committed event delivery and restart', () => {
     store.close();
     store = new ChatStore(path, root);
     expect(store.messaging.list(runId, 'a').map((v) => v.status)).toEqual(['uncertain', 'queued']);
-    expect(store.messaging.next(runId, 'a')).toBeUndefined();
+    expect(store.messaging.next(runId, 'a')?.requestId).toBe('recovery-next');
     store.close();
     rmSync(root, { recursive: true, force: true });
   });
