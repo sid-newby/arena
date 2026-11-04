@@ -1,3 +1,4 @@
+import { resumeAudio } from './resume-audio.ts';
 import type { AgentId } from './agents.ts';
 
 export type Speaker = AgentId;
@@ -117,23 +118,8 @@ export class SpeechQueue {
   get isBusy() {
     return this.running || this.queue.length > 0;
   }
-  async resume() {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        this.context.resume(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error('Audio playback did not unlock. Enable speech again.')),
-            5000,
-          );
-        }),
-      ]);
-      if (this.context.state !== 'running')
-        throw new Error('Audio playback is suspended. Enable speech again.');
-    } finally {
-      clearTimeout(timer);
-    }
+  resume(signal = AbortSignal.timeout(5000)) {
+    return resumeAudio(this.context, signal);
   }
   enqueue(segments: SpeechSegment[]) {
     if (this.queue.length + segments.length > 256)

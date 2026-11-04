@@ -18,7 +18,6 @@ export function VoiceBand({
   names,
   target,
   setTarget,
-  awaitingActivation,
   toggleSpeech,
   toggleMicrophone,
   conversation,
@@ -36,7 +35,6 @@ export function VoiceBand({
   names: Record<AgentId, string>;
   target: VoiceTarget;
   setTarget: (target: VoiceTarget) => void;
-  awaitingActivation: boolean;
   toggleSpeech: () => void;
   toggleMicrophone: () => void;
   conversation: Conversation;
@@ -62,8 +60,8 @@ export function VoiceBand({
       ? `“${microphone.interim}”`
       : preview
         ? 'Preview · speech and microphone off'
-        : awaitingActivation
-          ? 'Click anywhere to start speech and the microphone'
+        : speech.starting || microphone.starting
+          ? 'Starting audio · allow the microphone or click the room if prompted'
           : conversation.status === 'stopped' && !conversationActive
             ? 'Conversation stopped'
             : [
@@ -84,7 +82,6 @@ export function VoiceBand({
           variant="ghost"
           aria-pressed={speech.enabled}
           disabled={
-            speech.starting ||
             speech.testing ||
             (!speech.enabled && (!speech.ready || preview || !speech.connectionsReady))
           }
@@ -99,10 +96,7 @@ export function VoiceBand({
           variant="ghost"
           aria-pressed={microphone.enabled}
           data-listening={microphone.listening || undefined}
-          disabled={
-            microphone.starting ||
-            (!microphone.enabled && (!microphone.supported || !microphone.ready || preview))
-          }
+          disabled={!microphone.enabled && (!microphone.supported || !microphone.ready || preview)}
           title={
             !microphone.supported
               ? 'This browser cannot capture microphone audio.'

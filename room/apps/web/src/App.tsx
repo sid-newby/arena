@@ -33,10 +33,6 @@ function writePreference(key: string, enabled: boolean) {
     /* The preference still applies for this visit. */
   }
 }
-function userHasActivated() {
-  return navigator.userActivation?.hasBeenActive ?? false;
-}
-
 export default function App() {
   const debate = window.location.pathname.replace(/\/$/, '') === '/debate';
   useEffect(() => {
@@ -69,24 +65,14 @@ export default function App() {
         );
     },
   });
-  const [wanted, setWanted] = useState(() => ({
-    speech: readPreference('lilbits-speech'),
-    microphone: readPreference('lilbits-microphone'),
-  }));
-  const [activated, setActivated] = useState(userHasActivated);
-  useEffect(() => {
-    if (activated) return;
-    const arm = () => setActivated(true);
-    window.addEventListener('pointerdown', arm, { once: true, capture: true });
-    window.addEventListener('keydown', arm, { once: true, capture: true });
-    return () => {
-      window.removeEventListener('pointerdown', arm, { capture: true });
-      window.removeEventListener('keydown', arm, { capture: true });
-    };
-  }, [activated]);
+  const [wanted, setWanted] = useState({ speech: true, microphone: true });
   const autoStarted = useRef({ speech: false, microphone: false });
   useEffect(() => {
-    if (!activated || preview) return;
+    // Re-arm after preview or a dev refresh tears down the audio devices.
+    if (!preview) autoStarted.current = { speech: false, microphone: false };
+  }, [preview]);
+  useEffect(() => {
+    if (preview) return;
     if (
       wanted.speech &&
       !autoStarted.current.speech &&
@@ -109,18 +95,18 @@ export default function App() {
       autoStarted.current.microphone = true;
       void microphone.enable();
     }
-  }, [activated, preview, wanted, speech, microphone]);
+  }, [preview, wanted, speech, microphone]);
   function toggleSpeech() {
-    const enable = !speech.enabled;
+    const enable = !speech.enabled && !speech.starting;
     setWanted((current) => ({ ...current, speech: enable }));
-    writePreference('lilbits-speech', enable);
+    autoStarted.current.speech = true;
     if (enable) void speech.enable();
     else speech.disable();
   }
   function toggleMicrophone() {
-    const enable = !microphone.enabled;
+    const enable = !microphone.enabled && !microphone.starting;
     setWanted((current) => ({ ...current, microphone: enable }));
-    writePreference('lilbits-microphone', enable);
+    autoStarted.current.microphone = true;
     if (enable) void microphone.enable();
     else microphone.disable();
   }
@@ -346,7 +332,6 @@ export default function App() {
           }}
           target={voiceTarget}
           setTarget={setVoiceTarget}
-          awaitingActivation={!activated && (wanted.speech || wanted.microphone)}
           toggleSpeech={toggleSpeech}
           toggleMicrophone={toggleMicrophone}
           conversation={conversationAction}

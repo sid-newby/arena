@@ -13,7 +13,7 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
   const queue = useRef<SpeechQueue | undefined>(undefined);
   const tracker = useRef(new SpeechTracker());
   const testingRef = useRef(false);
-  const lifecycle = useRef<object>({});
+  const lifecycle = useRef<AbortController | undefined>(undefined);
   const interruptions = useRef(new SpeechInterruptions());
   const [ready, setReady] = useState(false);
   const [detail, setDetail] = useState('Checking Cartesia setup…');
@@ -38,7 +38,8 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
         tracker.current.baseline(agent, latest.current[agent].snapshot.messages, mode);
   }, []);
   const cancelPlayback = useCallback(() => {
-    lifecycle.current = {};
+    lifecycle.current?.abort();
+    lifecycle.current = undefined;
     testingRef.current = false;
     setTesting(false);
     setStarting(false);
@@ -90,7 +91,8 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
       });
     return () => {
       controller.abort();
-      lifecycle.current = {};
+      lifecycle.current?.abort();
+      lifecycle.current = undefined;
       testingRef.current = false;
       queue.current?.close();
       queue.current = undefined;
@@ -123,11 +125,11 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
       if (preview) stop();
       return;
     }
-    if (!enabled) return;
     if (preview) {
-      disable();
+      if (enabled || lifecycle.current) disable();
       return;
     }
+    if (!enabled) return;
     if (!connectionsReady) {
       cancelPlayback();
       setStatus('Speech on · waiting for connection');
@@ -181,7 +183,8 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
   ]);
   /* oxlint-enable react/set-state-in-effect */
   async function prepare() {
-    const operation = {};
+    lifecycle.current?.abort();
+    const operation = new AbortController();
     lifecycle.current = operation;
     setStarting(true);
     setError(undefined);
@@ -206,16 +209,17 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
             setEnabled(false);
           },
         );
-      await queue.current.resume();
+      await queue.current.resume(operation.signal);
       if (operation !== lifecycle.current) return false;
       return true;
     } catch {
+      if (operation.signal.aborted) return false;
       setError('Audio playback could not start. Try enabling speech again.');
       testingRef.current = false;
       setTesting(false);
       return false;
     } finally {
-      setStarting(false);
+      if (operation === lifecycle.current) setStarting(false);
     }
   }
   async function enable() {

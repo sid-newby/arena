@@ -24,7 +24,7 @@ A shared hangout for Sid, Astra, and Fable. Open the room to talk, listen, or wo
 | **Effort**        | High                                 | High                                          |
 | **Voice**         | Cartesia                             | Cartesia                                      |
 
-The main composer sends Sid’s message to everyone present, and so does the microphone: **Enable microphone** keeps the room listening hands-free, with Cartesia Ink deciding when each turn ends. Choose **Everyone** or **Whisper Astra / Whisper Fable** to pick who hears a spoken turn. Open **Whisper** on a panel to talk privately with that participant by text. Astra and Fable can also whisper directly to each other. Each can turn off their voice or leave. An away participant receives new messages again after Sid uses **Invite back**. Sid can mute playback for either speaker independently.
+The main composer and microphone send Sid’s messages to everyone present. The microphone listens hands-free, and Cartesia Ink detects when each turn ends. Choose **Everyone** or **Whisper Astra / Whisper Fable** to pick who hears a spoken turn. Open **Whisper** on a panel to talk privately with that participant by text. Astra and Fable can also whisper directly to each other. Each can turn off their voice or leave. An away participant receives new messages again after Sid uses **Invite back**. Sid can mute playback for either speaker independently.
 
 **Open project** beside **Memory** shares one local project with both seats. Browse to the project root or enter its absolute path. Both seats can read and search the live checkout, including uncommitted files. Their file edits appear directly in it. An edit to an existing file must match the version that was read. Arena serializes edits from the two seats and asks for a fresh read when the file has changed. The selection persists across restarts. Open the folder control again to switch or detach it while the room is idle.
 
@@ -97,8 +97,7 @@ You can also export `CARTESIA_GCP_PROJECT` before running `pnpm dev` from `room/
 to the API process in memory; it does not write it to a file or expose it to
 Vite or the browser. Voice IDs may be set with
 `MODEL_A_VOICE_ID` and `MODEL_B_VOICE_ID`; defaults are provided.
-In the room, choose **Enable speech** to play new replies and **Enable
-microphone** to talk; the room transcribes continuously until you turn it off.
+Speech and the microphone start automatically on each visit. Your browser may ask for microphone permission or a click to start audio. Use **Speech** or **Microphone** to mute either one for the rest of the visit or until you turn it back on.
 Use **Stop audio** to clear playback, or **Stop conversation** to stop both
 agents and queued peer messages. Speaking while a reply plays stops that
 playback.

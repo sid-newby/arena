@@ -6,16 +6,14 @@ schedules incoming 44.1kHz float32 PCM chunks through Web Audio, one speaker at
 a time. Sid's voice is transcribed with Ink speech-to-text over a second
 server-side WebSocket; see [Listening](#listening) below.
 
-Speech starts off when the page loads. Enable speech explicitly to send narration
-for completed replies to Cartesia. The choice stays on across run changes and
-temporary reconnects. These transitions cancel old audio; the first snapshots
+Speech starts automatically on each visit when the room is ready. A browser that requires a gesture unlocks playback on a click or keypress. The Speech button mutes playback until the next page load or until Sid turns it back on. The choice applies across run changes and temporary reconnects. These transitions cancel old audio; the first snapshots
 of another run skip completed history and allow active replies to finish speaking.
 Enabling speech also skips completed history and includes replies still in progress.
 Preview switches speech off. Stop audio, voice tests, and turn failure suppress
 the affected active replies so their late completions are not spoken.
 The fixed voice sample buttons are separate from automatic reply speech. Stop
-audio cancels the request and all scheduled sources. End-to-end timeout is45s;
-AudioContext unlock timeout is5s. No automatic synthesis retry is performed.
+audio cancels the request and all scheduled sources. The end-to-end timeout is 45 seconds.
+The browser can keep playback waiting for a gesture. No automatic synthesis retry is performed.
 
 ## Browser lifecycle regression
 
@@ -111,8 +109,7 @@ second watcher or terminate unrelated services. Frontend remains on58241.
 
 ## Listening
 
-The room listens hands-free. **Enable microphone** asks for the microphone once,
-then streams audio continuously while it stays on. There is no push-to-talk.
+The room requests microphone access on each visit and listens hands-free once the browser allows it. The **Microphone** button stops capture or turns it back on. There is no push-to-talk.
 Cartesia's `ink-2` turn-detection model decides when Sid starts and stops
 talking and returns one transcript per turn.
 

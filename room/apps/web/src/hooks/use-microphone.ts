@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { resumeAudio } from '@/lib/resume-audio';
 import {
   listenSocketUrl,
   parseListenEvent,
@@ -35,6 +36,7 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
     latest.current = callbacks;
   }, [callbacks]);
   const capture = useRef<Capture>(undefined);
+  const startup = useRef<AbortController>(undefined);
   const supported =
     typeof navigator !== 'undefined' &&
     Boolean(navigator.mediaDevices?.getUserMedia) &&
@@ -50,6 +52,8 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
   const [error, setError] = useState<string>();
 
   const teardown = useCallback(() => {
+    startup.current?.abort();
+    startup.current = undefined;
     const current = capture.current;
     capture.current = undefined;
     if (!current) return;
@@ -61,6 +65,7 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
 
   const disable = useCallback(() => {
     teardown();
+    setStarting(false);
     setEnabled(false);
     setListening(false);
     setInterim('');
@@ -69,6 +74,7 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
 
   /* oxlint-disable react/set-state-in-effect -- Document lifecycle resets external capture. */
   useEffect(() => {
+    disable();
     const controller = new AbortController();
     void fetch('/api/speech/listen/status', { signal: controller.signal })
       .then(async (response) => {
@@ -94,10 +100,10 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
       controller.abort();
       teardown();
     };
-  }, [teardown]);
+  }, [teardown, disable]);
   useEffect(() => {
-    if (preview && enabled) disable();
-  }, [preview, enabled, disable]);
+    if (preview) disable();
+  }, [preview, disable]);
   /* oxlint-enable react/set-state-in-effect */
 
   function connect(current: Capture) {
@@ -174,7 +180,9 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
   }
 
   async function enable() {
-    if (!supported || !ready || preview || starting || capture.current) return;
+    if (!supported || !ready || preview || startup.current || capture.current) return;
+    const operation = new AbortController();
+    startup.current = operation;
     setStarting(true);
     setError(undefined);
     let stream: MediaStream | undefined;
@@ -188,12 +196,20 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
           autoGainControl: true,
         },
       });
+      operation.signal.throwIfAborted();
+      operation.signal.addEventListener(
+        'abort',
+        () => {
+          for (const track of stream?.getTracks() ?? []) track.stop();
+        },
+        { once: true },
+      );
       try {
         context = new AudioContext({ sampleRate: LISTEN_RATE });
       } catch {
         context = new AudioContext();
       }
-      await context.resume();
+      await resumeAudio(context, operation.signal);
       const moduleUrl = URL.createObjectURL(
         new Blob([PCM_CAPTURE_WORKLET], { type: 'application/javascript' }),
       );
@@ -202,6 +218,7 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
       } finally {
         URL.revokeObjectURL(moduleUrl);
       }
+      operation.signal.throwIfAborted();
       const current: Capture = {
         stream,
         context,
@@ -233,13 +250,17 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
     } catch (cause) {
       for (const track of stream?.getTracks() ?? []) track.stop();
       void context?.close().catch(() => {});
+      if (operation.signal.aborted) return;
       setError(
         cause instanceof DOMException && cause.name === 'NotAllowedError'
           ? 'Microphone permission was denied. Allow the microphone and try again.'
           : 'The microphone could not start. Check the input device and try again.',
       );
     } finally {
-      setStarting(false);
+      if (startup.current === operation) {
+        startup.current = undefined;
+        setStarting(false);
+      }
     }
   }
 

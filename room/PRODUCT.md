@@ -35,7 +35,7 @@ starts a fresh continuation while preserving visible history and original author
 Restarted active turns fail visibly rather than replaying.
 
 Each agent can control its own panel pose. Face the audience, face the other
-model, or recenter. Agents own their panels; Sid has no pose controls. Speech playback and the microphone start on by default once Sid has interacted with the page, and each stays off once switched off. Reduced-motion preferences affect rendering only. This increment
+model, or recenter. Agents own their panels; Sid has no pose controls. Speech playback and the microphone start on each visit as soon as the browser allows them. Sid can mute and re-enable either one independently during the visit. Reduced-motion preferences affect rendering only. This increment
 provides text conversation, bounded room tools, Cartesia speech, and explicit
 panelist delivery. Prepared structured runs provide common contained file and command tools.
 Agents can use web search and Context7 for research, and build commands have network access.
