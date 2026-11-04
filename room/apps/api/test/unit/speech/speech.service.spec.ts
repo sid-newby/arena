@@ -1,6 +1,5 @@
 import {
   SpeechService,
-  SPEECH_VOICES,
   type SpeechContext,
   type SpeechEvent,
   type SpeechSocket,
@@ -131,8 +130,8 @@ describe('Cartesia speech boundary', () => {
     await settle();
     expect(open).toHaveBeenCalledTimes(1);
     expect(socket.contexts.map((context) => context.voice)).toEqual([
-      SPEECH_VOICES.a,
-      SPEECH_VOICES.b,
+      service.voices.voiceId('a', 'hangout'),
+      service.voices.voiceId('b', 'hangout'),
     ]);
     socket.contexts[1].add({ type: 'chunk', audio: Uint8Array.of(9, 8, 7, 6) });
     socket.contexts[0].add({ type: 'chunk', audio: Uint8Array.of(1, 2, 3, 4) });

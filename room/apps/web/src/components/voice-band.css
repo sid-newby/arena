@@ -77,6 +77,37 @@
 .band-status[data-error] {
   color: var(--destructive);
 }
+/* Sid's last spoken turn stays visible after it sends, so nothing vanishes silently. */
+.you-said {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.you-said-label {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 9px;
+}
+.you-said-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.you-said[data-ignored] {
+  color: var(--destructive);
+}
+.you-said[data-ignored] .you-said-label {
+  color: var(--destructive);
+}
 .band-more {
   position: relative;
   flex-shrink: 0;
@@ -134,4 +165,41 @@
   .band-group + .band-group {
     padding-left: 8px;
   }
+}
+
+.voice-pick {
+  display: grid;
+  gap: 3px;
+  padding: 2px 6px 6px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.voice-pick select,
+.voice-add input {
+  min-height: 28px;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--input);
+}
+.voice-add {
+  display: grid;
+  gap: 3px;
+  padding: 4px 6px 6px;
+  border-top: 1px solid color-mix(in oklch, var(--border), transparent 30%);
+}
+.voice-add [data-slot='button'] {
+  justify-self: start;
+}
+.voice-custom {
+  display: grid;
+  gap: 2px;
+}
+.voice-error {
+  margin: 0;
+  padding: 0 6px 4px;
+  font-size: 10px;
+  color: var(--destructive);
 }

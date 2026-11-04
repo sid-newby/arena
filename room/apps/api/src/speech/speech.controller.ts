@@ -1,8 +1,22 @@
 import { ChatService } from '../chat/chat.service.js';
-import { Body, Controller, Get, Inject, Post, Req, Res } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { SpeechService } from './speech.service.js';
 import { ListenService } from './listen.service.js';
+import { isSpeechAgent } from './voices.js';
 
 @Controller('speech')
 export class SpeechController {
@@ -20,6 +34,32 @@ export class SpeechController {
   @Get('listen/status')
   listenStatus() {
     return this.listen.status();
+  }
+
+  @Get('voices')
+  voices(@Query('runId') runId?: string) {
+    return this.speech.voices.view(typeof runId === 'string' && runId ? runId : 'hangout');
+  }
+
+  @Put('voices/:runId/:seat')
+  selectVoice(@Param('runId') runId: string, @Param('seat') seat: string, @Body() body: unknown) {
+    if (!isSpeechAgent(seat)) throw new BadRequestException('Choose seat a or b.');
+    const alias =
+      typeof body === 'object' && body !== null && 'alias' in body ? body.alias : undefined;
+    return this.speech.voices.select(runId, seat, alias);
+  }
+
+  @Post('voices')
+  addVoice(@Body() body: unknown) {
+    const input =
+      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+    return this.speech.voices.add(input.alias, input.id);
+  }
+
+  @Delete('voices/:alias')
+  removeVoice(@Param('alias') alias: string) {
+    this.speech.voices.remove(alias);
+    return { removed: alias };
   }
 
   @Post('stream')

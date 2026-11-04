@@ -61,12 +61,25 @@ export async function runAnthropic(
   });
   async function* input(): AsyncGenerator<SDKUserMessage> {
     await authorized;
-    if (authorizedToSend && !context.controller.signal.aborted)
+    if (!authorizedToSend || context.controller.signal.aborted) return;
+    yield {
+      type: 'user',
+      message: { role: 'user', content: context.text },
+      parent_tool_use_id: null,
+    };
+    if (!context.inbox) return;
+    // Sid's follow-ups join this same reply at the next tool boundary. The
+    // generator stays open until the turn's result closes the inbox.
+    for await (const text of context.inbox) {
+      if (context.controller.signal.aborted) return;
       yield {
         type: 'user',
-        message: { role: 'user', content: context.text },
+        message: { role: 'user', content: text },
         parent_tool_use_id: null,
-      };
+        priority: 'next',
+        origin: { kind: 'human' },
+      } as SDKUserMessage;
+    }
   }
   const session = query({
     prompt: input(),
@@ -169,6 +182,8 @@ export async function runAnthropic(
         )
           throw new Error('Claude reply ended before natural completion.');
         completed = true;
+        // End the open prompt generator so the streaming session can finish.
+        context.inbox?.close();
       }
     }
     if (context.controller.signal.aborted && authorizedToSend && !terminalSeen)
@@ -182,6 +197,7 @@ export async function runAnthropic(
   } finally {
     clearTimeout(cancellationTimer);
     context.controller.signal.removeEventListener('abort', abort);
+    context.inbox?.close();
     releaseInput();
     session.close();
   }

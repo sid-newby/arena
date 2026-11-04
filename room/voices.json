@@ -1,0 +1,8 @@
+{
+  "voices": [
+    { "alias": "Astra", "id": "064b17af-d36b-4bfb-b003-be07dba1b649" },
+    { "alias": "Fable", "id": "a5136bf9-224c-4d76-b823-52bd5efcffcc" },
+    { "alias": "Opus", "id": "365dc2a1-3832-4437-b946-0bad694fc0e6" }
+  ],
+  "defaults": { "a": "Astra", "b": "Fable" }
+}

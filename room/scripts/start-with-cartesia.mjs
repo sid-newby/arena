@@ -1,8 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { parseEnv } from 'node:util';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const api = fileURLToPath(new URL('../apps/api/', import.meta.url));
 const watch = process.argv.includes('--watch');
@@ -58,20 +57,6 @@ if (check) {
 }
 const key = result.stdout.trim();
 result.stdout = '';
-const voiceFile = new URL('../../cartesia/.env', import.meta.url);
-const voiceConfig = existsSync(voiceFile) ? parseEnv(readFileSync(voiceFile, 'utf8')) : {};
-const voices = {};
-for (const [name, previous] of [
-  ['MODEL_A_VOICE_ID', 'LUNA_CARTESIA_VOICE_ID'],
-  ['MODEL_B_VOICE_ID', 'OPUS_CARTESIA_VOICE_ID'],
-]) {
-  const value =
-    process.env[name]?.trim() ||
-    process.env[previous]?.trim() ||
-    voiceConfig[name]?.trim() ||
-    voiceConfig[previous]?.trim();
-  if (value) voices[name] = value;
-}
 const apiRequire = createRequire(new URL('../apps/api/package.json', import.meta.url));
 const args = watch
   ? [apiRequire.resolve('@nestjs/cli/bin/nest.js'), 'start', '--watch']
@@ -80,7 +65,6 @@ const server = spawn(process.execPath, args, {
   cwd: api,
   env: {
     ...process.env,
-    ...voices,
     PORT: process.env.PORT || '58242',
     ROOM_WORKSPACE: process.env.ROOM_WORKSPACE || root,
     CARTESIA_API_KEY: key,

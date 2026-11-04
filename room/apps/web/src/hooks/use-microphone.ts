@@ -50,6 +50,10 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
   const [interim, setInterim] = useState('');
   const [status, setStatus] = useState('Microphone off');
   const [error, setError] = useState<string>();
+  /** The last turn that left the browser, kept visible so Sid can see what went out. */
+  const [lastSent, setLastSent] = useState<{ text: string; at: number }>();
+  /** The last turn the echo guard dropped. Nothing disappears silently. */
+  const [lastIgnored, setLastIgnored] = useState<{ text: string; at: number }>();
 
   const teardown = useCallback(() => {
     startup.current?.abort();
@@ -147,10 +151,13 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
             current.turnDuringPlayback &&
             looksLikeEcho(text, latest.current.spoken?.() ?? [])
           ) {
+            setLastIgnored({ text, at: Date.now() });
             setStatus('Ignored playback echo · listening');
             return;
           }
           if (text) {
+            setLastSent({ text, at: Date.now() });
+            setLastIgnored(undefined);
             setStatus('Sent · listening');
             latest.current.onTranscript(text);
           } else setStatus('Listening · speak any time');
@@ -169,13 +176,12 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
       if (current.closed || capture.current !== current) return;
       setListening(false);
       setInterim('');
-      if (current.attempts >= 5) {
-        setError('Listening connection lost. Enable the microphone again.');
-        disable();
-        return;
-      }
+      // Keep trying for as long as Sid wants the microphone on. An API restart can
+      // outlast a short retry budget, and a mic that switches itself off is worse
+      // than a status line that says "reconnecting".
       current.attempts += 1;
-      setTimeout(() => connect(current), Math.min(8000, 500 * 2 ** current.attempts));
+      if (current.attempts >= 5) setError('Microphone reconnecting · the room is restarting');
+      setTimeout(() => connect(current), Math.min(8000, 500 * 2 ** Math.min(current.attempts, 4)));
     });
   }
 
@@ -276,6 +282,8 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
     interim,
     status,
     error,
+    lastSent,
+    lastIgnored,
     enable,
     disable,
     notify,

@@ -95,8 +95,9 @@ To run with speech, run `CARTESIA_GCP_PROJECT=your-project-id task dev`. Your cu
 login must be able to read the `CARTESIA_API_KEY` secret in that project.
 You can also export `CARTESIA_GCP_PROJECT` before running `pnpm dev` from `room/`. The launcher passes the key
 to the API process in memory; it does not write it to a file or expose it to
-Vite or the browser. Voice IDs may be set with
-`MODEL_A_VOICE_ID` and `MODEL_B_VOICE_ID`; defaults are provided.
+Vite or the browser. Voices come from the named catalog in `room/voices.json`;
+pick one per seat, or add a new Cartesia voice ID, under **More** in the room's
+voice band.
 Speech and the microphone start automatically on each visit. Your browser may ask for microphone permission or a click to start audio. Use **Speech** or **Microphone** to mute either one for the rest of the visit or until you turn it back on.
 Use **Stop audio** to clear playback, or **Stop conversation** to stop both
 agents and queued peer messages. Speaking while a reply plays stops that
@@ -190,7 +191,7 @@ Sending from the main composer interrupts a busy seat. If an earlier delivery en
 [seat messaging](room/docs/seat-messaging.md) for delivery, cancellation, recovery,
 and side-conversation behavior.
 
-A/B voices follow the seats through `MODEL_A_VOICE_ID` and `MODEL_B_VOICE_ID`.
+A/B voices are chosen per session from the named catalog in `room/voices.json`.
 Speech in both directions is described in
 [`room/docs/cartesia-tts.md`](room/docs/cartesia-tts.md).
 Either seat can use an available subscribed Codex or Anthropic model. The staged

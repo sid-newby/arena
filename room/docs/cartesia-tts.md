@@ -63,9 +63,13 @@ instead of comparing exact wording. Temporary artifacts are retained for review.
 
 ## Configuration and startup
 
-Voice IDs are public constants in apps/api/src/speech/speech.service.ts:
-Luna064b17af-d36b-4bfb-b003-be07dba1b649;
-Opus365dc2a1-3832-4437-b946-0bad694fc0e6. Model sonic-3.6; neutral defaults.
+Voices live in a named catalog. `room/voices.json` seeds it with aliases and
+Cartesia voice IDs plus a default alias per seat. The **More** panel in the voice
+band lists the catalog in a dropdown per seat, lets Sid add a voice by name and
+ID, and removes voices that were added in the room. Seat choices and added
+voices persist in `.room/voices.json`, keyed by run, so each session keeps its
+own picks and a new run starts from the seed defaults. Voice IDs are public
+identifiers, not secrets; no `.env` is read. Model sonic-3.6; neutral defaults.
 Optional per-segment generation_config supports typed speed, volume and emotion.
 The server validates it; no automatic emotion classifier is installed.
 

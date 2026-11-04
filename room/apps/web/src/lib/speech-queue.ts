@@ -99,14 +99,32 @@ export class SpeechTracker {
   }
 }
 
+const SPEAKERS: Speaker[] = ['a', 'b'];
+const label = (agent: Speaker) => (agent === 'a' ? 'A' : 'B');
+
+/**
+ * One independent playback lane per speaker. Segments from the same seat play
+ * in order on that seat's own timeline; the two seats play at the same time on
+ * the shared AudioContext. Sid chose this on 2026-11-04: the room carries the
+ * conversation, it does not referee it. Nobody is cut off by the transport;
+ * a seat chooses whether to yield, and Stop audio remains explicit.
+ */
+type Lane = {
+  queue: SpeechSegment[];
+  controller?: AbortController;
+  sources: Set<AudioBufferSourceNode>;
+  generation: number;
+  running: boolean;
+  nextTime: number;
+  completedTest: boolean;
+  chunks: number;
+};
+
 export class SpeechQueue {
-  private queue: SpeechSegment[] = [];
-  private controller?: AbortController;
-  private speaker?: Speaker;
-  private sources = new Set<AudioBufferSourceNode>();
-  private generation = 0;
-  private running = false;
-  private nextTime = 0;
+  private readonly lanes: Record<Speaker, Lane> = {
+    a: SpeechQueue.lane(),
+    b: SpeechQueue.lane(),
+  };
   private readonly context: AudioContext;
   private readonly state: (text: string, busy: boolean) => void;
   private readonly error: (text: string) => void;
@@ -115,61 +133,92 @@ export class SpeechQueue {
     this.error = error;
     this.context = new AudioContext();
   }
+  private static lane(): Lane {
+    return {
+      queue: [],
+      sources: new Set(),
+      generation: 0,
+      running: false,
+      nextTime: 0,
+      completedTest: false,
+      chunks: 0,
+    };
+  }
   get isBusy() {
-    return this.running || this.queue.length > 0;
+    return SPEAKERS.some((agent) => this.lanes[agent].running || this.lanes[agent].queue.length > 0);
+  }
+  /** Which seats are currently speaking, in seat order. */
+  get speaking(): Speaker[] {
+    return SPEAKERS.filter((agent) => this.lanes[agent].running);
   }
   resume(signal = AbortSignal.timeout(5000)) {
     return resumeAudio(this.context, signal);
   }
   enqueue(segments: SpeechSegment[]) {
-    if (this.queue.length + segments.length > 256)
+    const backlog = SPEAKERS.reduce((total, agent) => total + this.lanes[agent].queue.length, 0);
+    if (backlog + segments.length > 256)
       throw new Error('Speech backlog is full. Stop audio and enable speech again when ready.');
-    this.queue.push(...segments);
-    void this.pump();
+    for (const segment of segments) this.lanes[segment.agent].queue.push(segment);
+    for (const agent of SPEAKERS) void this.pump(agent);
   }
   silence(agent: Speaker) {
-    const remaining = this.queue.filter((segment) => segment.agent !== agent);
-    if (this.speaker === agent) {
-      this.stop();
-      this.state('Waiting for new replies', false);
-    }
-    this.queue = remaining;
+    const lane = this.lanes[agent];
+    const wasRunning = lane.running;
+    this.stopLane(agent);
+    if (wasRunning) this.report();
   }
   stop() {
-    this.speaker = undefined;
-    this.generation++;
-    this.queue = [];
-    this.controller?.abort();
-    for (const source of this.sources) {
+    for (const agent of SPEAKERS) this.stopLane(agent);
+  }
+  close() {
+    this.stop();
+    void this.context.close();
+  }
+  private stopLane(agent: Speaker) {
+    const lane = this.lanes[agent];
+    lane.generation++;
+    lane.queue = [];
+    lane.controller?.abort();
+    for (const source of lane.sources) {
       try {
         source.stop();
       } catch {
         /* Already ended. */
       }
     }
-    this.sources.clear();
-    this.nextTime = 0;
+    lane.sources.clear();
+    lane.nextTime = 0;
   }
-  close() {
-    this.stop();
-    void this.context.close();
+  private report() {
+    const speaking = this.speaking;
+    if (speaking.length)
+      this.state(`Speaking ${speaking.map(label).join(' and ')}`, true);
+    else {
+      const tested = SPEAKERS.filter((agent) => this.lanes[agent].completedTest);
+      if (tested.length) {
+        const chunks = tested.reduce((total, agent) => total + this.lanes[agent].chunks, 0);
+        for (const agent of tested) {
+          this.lanes[agent].completedTest = false;
+          this.lanes[agent].chunks = 0;
+        }
+        this.state(`Voice test complete · ${chunks} audio chunks played`, false);
+      } else this.state('Waiting for new replies', false);
+    }
   }
-  private async pump() {
-    if (this.running || !this.queue.length) return;
-    this.running = true;
-    const generation = this.generation;
-    let completedTest = false,
-      chunks = 0;
+  private async pump(agent: Speaker) {
+    const lane = this.lanes[agent];
+    if (lane.running || !lane.queue.length) return;
+    lane.running = true;
+    const generation = lane.generation;
     try {
-      while (this.queue.length && generation === this.generation) {
-        const segment = this.queue.shift()!;
-        this.speaker = segment.agent;
-        this.state(`Speaking ${segment.agent === 'a' ? 'A' : 'B'}`, true);
+      while (lane.queue.length && generation === lane.generation) {
+        const segment = lane.queue.shift()!;
+        this.report();
         if (this.context.state !== 'running')
           throw new Error('Audio playback was suspended. Enable speech again.');
-        this.controller = new AbortController();
+        lane.controller = new AbortController();
         const deadline = setTimeout(() => {
-          if (generation !== this.generation) return;
+          if (generation !== lane.generation) return;
           this.stop();
           this.error('Speech timed out after 45 seconds. Audio and queued speech were stopped.');
         }, 45_000);
@@ -181,7 +230,9 @@ export class SpeechQueue {
               agent: segment.agent,
               kind: segment.test ? 'test' : 'reply',
               ...(segment.test
-                ? {}
+                ? segment.runId
+                  ? { runId: segment.runId }
+                  : {}
                 : {
                     runId: segment.runId,
                     replyId: segment.replyId,
@@ -190,7 +241,7 @@ export class SpeechQueue {
                   }),
               requestId: segment.requestId,
             }),
-            signal: this.controller.signal,
+            signal: lane.controller.signal,
           });
           if (!response.ok || !response.body)
             throw new Error('Cartesia speech is unavailable. Check the server speech status.');
@@ -201,7 +252,7 @@ export class SpeechQueue {
             bytes = 0;
           const playback: Promise<void>[] = [];
           const consume = (line: string) => {
-            if (!line.trim() || generation !== this.generation) return;
+            if (!line.trim() || generation !== lane.generation) return;
             const event: unknown = JSON.parse(line);
             if (!event || typeof event !== 'object' || !('type' in event))
               throw new Error('Unreadable speech event.');
@@ -235,29 +286,29 @@ export class SpeechQueue {
             const source = this.context.createBufferSource();
             source.buffer = buffer;
             source.connect(this.context.destination);
-            this.sources.add(source);
-            chunks++;
+            lane.sources.add(source);
+            lane.chunks++;
             playback.push(
               new Promise((resolve) => {
                 source.addEventListener(
                   'ended',
                   () => {
                     source.disconnect();
-                    this.sources.delete(source);
+                    lane.sources.delete(source);
                     resolve();
                   },
                   { once: true },
                 );
               }),
             );
-            const when = Math.max(this.context.currentTime + 0.025, this.nextTime);
+            const when = Math.max(this.context.currentTime + 0.025, lane.nextTime);
             source.start(when);
-            this.nextTime = when + buffer.duration;
+            lane.nextTime = when + buffer.duration;
           };
           try {
             for (;;) {
               const chunk = await reader.read();
-              if (generation !== this.generation) return;
+              if (generation !== lane.generation) return;
               pending += decoder.decode(chunk.value, { stream: !chunk.done });
               if (pending.length > 2_000_000)
                 throw new Error('Speech event exceeded the supported size.');
@@ -274,7 +325,7 @@ export class SpeechQueue {
                 'Speech disconnected or returned no audio. Enable speech again to retry new replies.',
               );
             await Promise.all(playback);
-            completedTest = Boolean(segment.test);
+            if (segment.test) lane.completedTest = true;
           } finally {
             await reader.cancel().catch(() => {});
           }
@@ -282,22 +333,18 @@ export class SpeechQueue {
           clearTimeout(deadline);
         }
       }
-      if (generation === this.generation)
-        this.state(
-          completedTest
-            ? `Voice test complete · ${chunks} audio chunks played`
-            : 'Waiting for new replies',
-          false,
-        );
     } catch (cause) {
-      if (generation === this.generation) {
-        this.stop();
-        this.error(cause instanceof Error ? cause.message : 'Speech failed.');
+      if (generation === lane.generation) {
+        // One seat's failure silences that seat only. The other lane keeps playing.
+        this.stopLane(agent);
+        this.error(
+          `${label(agent)}: ${cause instanceof Error ? cause.message : 'Speech failed.'}`,
+        );
       }
     } finally {
-      this.speaker = undefined;
-      this.running = false;
-      if (this.queue.length) void this.pump();
+      lane.running = false;
+      if (generation === lane.generation) this.report();
+      if (lane.queue.length) void this.pump(agent);
     }
   }
 }

@@ -180,8 +180,11 @@ export class SeatMessageStore {
           this.update(message, 'cancelled');
   }
   finish(turnId: string, status: 'completed' | 'stopped' | 'failed', error?: string) {
-    const row = this.db.prepare('SELECT * FROM human_messages WHERE turn_id=?').get(turnId);
-    if (row && (row.status === 'running' || row.status === 'dispatching'))
-      this.update(receipt(row), status, { error });
+    // A turn can carry its opening message plus follow-ups delivered while it ran.
+    for (const row of this.db
+      .prepare('SELECT * FROM human_messages WHERE turn_id=? ORDER BY rowid')
+      .all(turnId))
+      if (row.status === 'running' || row.status === 'dispatching')
+        this.update(receipt(row), status, { error });
   }
 }

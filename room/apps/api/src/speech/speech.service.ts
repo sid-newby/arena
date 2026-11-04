@@ -10,6 +10,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import Cartesia from '@cartesia/cartesia-js';
 import { createRequire } from 'node:module';
+import { HANGOUT_ID } from '../memory/room-memory.js';
+import { VoiceCatalog, type SpeechAgent } from './voices.js';
 
 // The SDK ESM build catches undefined require('ws') and falls back to native WS,
 // which moves API keys into query parameters. Its public CJS build uses ws headers.
@@ -27,16 +29,6 @@ export function serverCartesiaKey(): string | undefined {
 
 export const SPEECH_MODEL = 'sonic-3.6';
 export const SPEECH_RATE = 44100;
-export const SPEECH_VOICES = {
-  a:
-    process.env.MODEL_A_VOICE_ID?.trim() ||
-    process.env.LUNA_CARTESIA_VOICE_ID?.trim() ||
-    '064b17af-d36b-4bfb-b003-be07dba1b649',
-  b:
-    process.env.MODEL_B_VOICE_ID?.trim() ||
-    process.env.OPUS_CARTESIA_VOICE_ID?.trim() ||
-    '365dc2a1-3832-4437-b946-0bad694fc0e6',
-} as const;
 export type SpeechReference = {
   agent: 'a' | 'b';
   runId: string;
@@ -44,7 +36,7 @@ export type SpeechReference = {
   revision: string;
   segment: number;
 };
-export type SpeechAgent = keyof typeof SPEECH_VOICES;
+export type { SpeechAgent };
 const emotions = [
   'neutral',
   'happy',
@@ -107,6 +99,7 @@ const emotions = [
 ] as const satisfies readonly Cartesia.Emotion[];
 export type SpeechRequest = {
   agent: SpeechAgent;
+  voice: string;
   text: string;
   requestId: string;
   generation_config: { speed: number; volume: number; emotion: Cartesia.Emotion };
@@ -208,9 +201,15 @@ export class SpeechService implements OnModuleDestroy {
   private readonly used = new Map<string, number>();
   private readonly active = new Map<string, () => void>();
   private destroyed = false;
+  voices = new VoiceCatalog();
 
-  static forTest(openSocket: OpenSocket, key = 'offline-test-key') {
+  static forTest(
+    openSocket: OpenSocket,
+    key = 'offline-test-key',
+    voices: VoiceCatalog = VoiceCatalog.inMemory(),
+  ) {
     const service = new SpeechService();
+    service.voices = voices;
     service.openSocket = openSocket;
     service.key = () => key;
     return service;
@@ -223,7 +222,10 @@ export class SpeechService implements OnModuleDestroy {
       detail: ready
         ? 'Cartesia key loaded on the server. Voice access is checked on explicit playback.'
         : 'Cartesia needs CARTESIA_API_KEY in the server process. No key belongs in the browser.',
-      voices: SPEECH_VOICES,
+      voices: {
+        a: this.voices.voiceId('a', HANGOUT_ID),
+        b: this.voices.voiceId('b', HANGOUT_ID),
+      },
       model: SPEECH_MODEL,
       sampleRate: SPEECH_RATE,
     };
@@ -246,13 +248,16 @@ export class SpeechService implements OnModuleDestroy {
         'Provide a saved narration reference or voice test, an agent, and a unique requestId.',
       );
     let text: string;
+    let runId = HANGOUT_ID;
     if (body.kind === 'test') {
       if (
         Object.keys(body).some(
-          (key) => !['kind', 'agent', 'requestId', 'generation_config'].includes(key),
-        )
+          (key) => !['kind', 'agent', 'requestId', 'runId', 'generation_config'].includes(key),
+        ) ||
+        ('runId' in body && typeof body.runId !== 'string')
       )
         throw new BadRequestException('Voice tests use only the fixed server phrase.');
+      if ('runId' in body && typeof body.runId === 'string') runId = body.runId;
       text = `Hello, this is ${String(body.agent).toUpperCase()} speaking.`;
     } else {
       if (
@@ -282,6 +287,7 @@ export class SpeechService implements OnModuleDestroy {
         )
       )
         throw new BadRequestException('Provide a complete saved narration reference.');
+      runId = body.runId;
       text = resolve({
         agent: body.agent as SpeechAgent,
         runId: body.runId,
@@ -313,6 +319,7 @@ export class SpeechService implements OnModuleDestroy {
     this.used.set(body.requestId, now + 10 * 60 * 1000);
     return {
       agent: body.agent as SpeechAgent,
+      voice: this.voices.voiceId(body.agent as SpeechAgent, runId),
       text,
       requestId: body.requestId,
       generation_config: config,
@@ -370,7 +377,7 @@ export class SpeechService implements OnModuleDestroy {
       context = socket.context({
         contextId: randomUUID(),
         model_id: SPEECH_MODEL,
-        voice: SPEECH_VOICES[request.agent],
+        voice: request.voice,
         output_format: { container: 'raw', encoding: 'pcm_f32le', sample_rate: SPEECH_RATE },
         language: 'en',
         timeout: 15000,

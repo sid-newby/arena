@@ -2,6 +2,8 @@ import { Mic, MicOff, Square, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { useMicrophone } from '@/hooks/use-microphone';
 import type { useSpeech } from '@/hooks/use-speech';
+import type { useVoices } from '@/hooks/use-voices';
+import { useState } from 'react';
 import { agentIds, type AgentId } from '@/lib/agents';
 import type { VoiceTarget } from '@/lib/microphone';
 import './voice-band.css';
@@ -13,6 +15,7 @@ type Conversation =
 export function VoiceBand({
   speech,
   microphone,
+  voices,
   preview,
   hangout,
   names,
@@ -30,6 +33,7 @@ export function VoiceBand({
 }: {
   speech: ReturnType<typeof useSpeech>;
   microphone: ReturnType<typeof useMicrophone>;
+  voices: ReturnType<typeof useVoices>;
   preview: boolean;
   hangout: boolean;
   names: Record<AgentId, string>;
@@ -45,6 +49,8 @@ export function VoiceBand({
   ping: () => void;
   reconnect?: () => void;
 }) {
+  const [newAlias, setNewAlias] = useState('');
+  const [newId, setNewId] = useState('');
   const options: { value: VoiceTarget; label: string }[] = [
     { value: 'room', label: 'Everyone' },
     { value: 'a', label: names.a },
@@ -65,15 +71,17 @@ export function VoiceBand({
           : conversation.status === 'stopped' && !conversationActive
             ? 'Conversation stopped'
             : [
-                speech.enabled ? speech.status : speech.ready ? 'Speech off' : speech.detail,
-                microphone.enabled
-                  ? microphone.status
-                  : microphone.supported
-                    ? microphone.ready
-                      ? 'Microphone off'
-                      : microphone.detail
-                    : 'No microphone capture in this browser',
-              ].join(' · ');
+                `Speech: ${speech.enabled ? speech.status.replace(/^Speech on · /, '') : speech.ready ? 'off' : speech.detail}`,
+                `Mic: ${
+                  microphone.enabled
+                    ? microphone.status
+                    : microphone.supported
+                      ? microphone.ready
+                        ? 'off'
+                        : microphone.detail
+                      : 'not available in this browser'
+                }`,
+              ].join('   ');
   return (
     <div className="voice-band" aria-label="Voice controls">
       <div className="band-group">
@@ -154,9 +162,98 @@ export function VoiceBand({
       >
         {status}
       </output>
+      {(microphone.lastIgnored || microphone.lastSent) && !microphone.interim && (
+        <output
+          className="you-said"
+          aria-live="polite"
+          data-ignored={Boolean(microphone.lastIgnored) || undefined}
+          title={
+            microphone.lastIgnored
+              ? 'The echo guard treated this as our own voice coming back through the speakers. Say it again and it will send.'
+              : 'Your last spoken turn, as it left the browser.'
+          }
+        >
+          <span className="you-said-label">
+            {microphone.lastIgnored ? 'Ignored as echo' : 'You said'}
+          </span>
+          <span className="you-said-text">
+            “{(microphone.lastIgnored ?? microphone.lastSent)!.text}”
+          </span>
+        </output>
+      )}
       <details className="band-more">
         <summary>More</summary>
         <div className="band-more-panel">
+          {voices.catalog &&
+            agentIds.map((agent) => (
+              <label key={`voice-${agent}`} className="voice-pick">
+                {names[agent]} voice
+                <select
+                  value={voices.catalog?.selection[agent]}
+                  disabled={voices.busy || preview}
+                  onChange={(event) => void voices.select(agent, event.target.value)}
+                >
+                  {voices.catalog?.voices.map((voice) => (
+                    <option key={voice.alias} value={voice.alias}>
+                      {voice.alias}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          <form
+            className="voice-add"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!newAlias.trim() || !newId.trim()) return;
+              void voices.add(newAlias.trim(), newId.trim()).then(() => {
+                setNewAlias('');
+                setNewId('');
+              });
+            }}
+          >
+            <input
+              aria-label="New voice name"
+              placeholder="Name"
+              value={newAlias}
+              maxLength={32}
+              onChange={(event) => setNewAlias(event.target.value)}
+            />
+            <input
+              aria-label="Cartesia voice ID"
+              placeholder="Cartesia voice ID"
+              value={newId}
+              spellCheck={false}
+              onChange={(event) => setNewId(event.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              type="submit"
+              disabled={voices.busy || !newAlias.trim() || !newId.trim()}
+            >
+              Add voice
+            </Button>
+          </form>
+          {voices.catalog?.voices.some((voice) => voice.custom) && (
+            <div className="voice-custom">
+              {voices.catalog.voices
+                .filter((voice) => voice.custom)
+                .map((voice) => (
+                  <Button
+                    key={voice.alias}
+                    size="sm"
+                    variant="ghost"
+                    disabled={voices.busy}
+                    title={`Remove ${voice.alias} from the catalog`}
+                    onClick={() => void voices.remove(voice.alias)}
+                  >
+                    Remove {voice.alias}
+                  </Button>
+                ))}
+            </div>
+          )}
+          {voices.error && <p className="voice-error">{voices.error}</p>}
           {hangout &&
             agentIds.map((agent) => (
               <Button

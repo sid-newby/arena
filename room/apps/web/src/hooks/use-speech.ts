@@ -131,27 +131,25 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
     }
     if (!enabled) return;
     if (!connectionsReady) {
-      cancelPlayback();
-      setStatus('Speech on · waiting for connection');
+      // A seat's event stream is reconnecting. Let audio already playing finish;
+      // new replies queue when the stream returns. Only Stop audio cancels playback.
+      setStatus('Speech on · reconnecting to the room');
       return;
     }
-    const aInterrupted = interruptions.current.observe('a', agents.a.snapshot.messages);
-    const bInterrupted = interruptions.current.observe('b', agents.b.snapshot.messages);
-    const interrupted = aInterrupted.interrupted || bInterrupted.interrupted;
-    if (interrupted) {
-      queue.current?.stop();
-      setBusy(false);
-      for (const [agent, observation] of [
-        ['a', aInterrupted],
-        ['b', bInterrupted],
-      ] as const)
-        tracker.current.baseline(
-          agent,
-          agents[agent].snapshot.messages.filter((reply) =>
-            observation.previousReplyIds.has(reply.id),
-          ),
-        );
-      setStatus('Audio stopped · waiting for new replies');
+    // A stopped or failed turn silences that seat's own pending audio only.
+    // The other seat keeps speaking; nobody is cut off by someone else's turn.
+    for (const [agent, observation] of [
+      ['a', interruptions.current.observe('a', agents.a.snapshot.messages)],
+      ['b', interruptions.current.observe('b', agents.b.snapshot.messages)],
+    ] as const) {
+      if (!observation.interrupted) continue;
+      queue.current?.silence(agent);
+      tracker.current.baseline(
+        agent,
+        agents[agent].snapshot.messages.filter((reply) =>
+          observation.previousReplyIds.has(reply.id),
+        ),
+      );
     }
     for (const agent of agentIds) {
       try {
@@ -257,6 +255,7 @@ export function useSpeech(agents: Agents, preview: boolean, runId?: string) {
           text: `Hello, this is ${agent === 'a' ? 'A' : 'B'} speaking.`,
           requestId: crypto.randomUUID(),
           test: true,
+          ...(runId ? { runId } : {}),
         },
       ]);
     } catch {

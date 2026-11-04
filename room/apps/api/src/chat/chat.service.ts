@@ -46,6 +46,7 @@ import {
   type PanelTarget,
 } from './panel-presence.js';
 import { PANELISTS } from './panelist-delivery.js';
+import { FollowUps } from './follow-ups.js';
 import { hangoutInstructions, hangoutParticipationTools, runtimeTools } from './runtime-tools.js';
 import type {
   AgentId,
@@ -63,6 +64,8 @@ export class ChatService implements OnModuleDestroy {
       controller: AbortController;
       promise: Promise<void>;
       turn: TurnRow;
+      /** Present when this runtime can read Sid's follow-ups mid-reply. */
+      inbox?: FollowUps;
     }
   >();
   private readonly humanWaiters = new Map<string, number>();
@@ -773,7 +776,10 @@ export class ChatService implements OnModuleDestroy {
     const message = this.store.messaging.next(runId, agent);
     if (!message) return;
     const active = this.active.get(key);
-    if (active && message.intent !== 'interrupt') return;
+    // Sid's words reach a reply in progress when the runtime can read them
+    // mid-turn. Otherwise a non-interrupt message waits for the reply to end.
+    const followUp = Boolean(active) && message.intent !== 'interrupt';
+    if (followUp && (!active?.inbox || active.inbox.isClosed)) return;
     this.messagePumps.add(key);
     const epoch = this.stopEpochs.get(runId) ?? 0;
     const seatEpoch = this.seatStopEpochs.get(key) ?? 0;
@@ -786,6 +792,23 @@ export class ChatService implements OnModuleDestroy {
       )
         throw new ConflictException('The saved message belongs to an earlier configuration.');
       this.executionPolicy?.intervention?.(runId, agent, message.intent);
+      if (followUp && active?.inbox) {
+        const turnId = active.turn.id;
+        this.store.messaging.update(message, 'running', { turnId });
+        this.store.runs.append(runId, 'human.prompt', agent, turnId, {
+          text: message.text,
+          requestId: message.requestId,
+          trigger: 'follow-up',
+          bindingId: binding.id,
+          revision: this.store.messaging.dispatchRevision(message.id),
+        });
+        if (!active.inbox.push(`Sid’s follow-up, sent while you were replying:\n${message.text}`)) {
+          // The reply ended between the check and the push; let the normal path take it.
+          this.store.messaging.update(message, 'queued');
+          this.scheduleDrain(runId);
+        }
+        return;
+      }
       this.store.messaging.update(message, 'dispatching');
       if (active) {
         this.store
@@ -871,6 +894,9 @@ export class ChatService implements OnModuleDestroy {
             ).values(),
           ]
         : undefined;
+    // Only the Anthropic runtime reads input mid-turn today. Codex seats keep
+    // the inbox undefined so their follow-ups wait for the reply to end.
+    const inbox = binding.config.provider === 'anthropic' ? new FollowUps() : undefined;
     const promise = Promise.resolve().then(async () => {
       const started = performance.now();
       try {
@@ -879,6 +905,7 @@ export class ChatService implements OnModuleDestroy {
         const savedSession = this.store.runs.session(binding.id)?.continuation;
         const savedToolVersion = this.store.runs.session(binding.id)?.toolVersion ?? 0;
         await runtime.run({
+          inbox,
           text: store.publicTurnPrompt(turn),
           tools: definitions,
           instructions: hangout
@@ -1096,12 +1123,13 @@ export class ChatService implements OnModuleDestroy {
           }
         }
       } finally {
+        inbox?.close();
         this.active.delete(key);
         this.emitBoth(turn.run_id);
         this.scheduleDrain(turn.run_id);
       }
     });
-    this.active.set(key, { controller, promise, turn });
+    this.active.set(key, { controller, promise, turn, inbox });
     this.emitBoth(turn.run_id);
   }
   async stop(agent: AgentId, runId = this.store.runs.currentId()) {

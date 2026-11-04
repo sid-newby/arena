@@ -11,6 +11,7 @@ import { VoiceBand } from '@/components/voice-band';
 import { useAgents } from '@/hooks/use-agents';
 import { useSpeech } from '@/hooks/use-speech';
 import { useMicrophone } from '@/hooks/use-microphone';
+import { useVoices } from '@/hooks/use-voices';
 import type { VoiceTarget } from '@/lib/microphone';
 import { agentIds, api, modelPanelName, panelistName, type AgentId } from '@/lib/agents';
 import { assertSendScope, type DeliveryBatch } from '@/lib/run-scope';
@@ -42,10 +43,12 @@ export default function App() {
   const [preview, setPreview] = useState(false);
   const speech = useSpeech(room.agents, preview, room.runId);
   const [voiceTarget, setVoiceTarget] = useState<VoiceTarget>('room');
+  const voices = useVoices(room.runId);
   const voiceQueue = useRef(Promise.resolve());
   const microphone = useMicrophone(preview, {
     onSpeech: () => {
-      if (speech.busy) speech.stop();
+      // Sid's voice is new information, not a cancellation. Playback continues;
+      // each seat chooses whether to yield. Stop audio remains explicit.
     },
     playing: () => speech.busy,
     spoken: () =>
@@ -65,7 +68,26 @@ export default function App() {
         );
     },
   });
-  const [wanted, setWanted] = useState({ speech: true, microphone: true });
+  // Speech and the microphone default on for each visit. Within a visit, Sid's
+  // choice survives Vite hot reloads so a file save never switches his mic back on.
+  const [wanted, setWanted] = useState(() => {
+    try {
+      return {
+        speech: sessionStorage.getItem('lilbits-speech') !== 'off',
+        microphone: sessionStorage.getItem('lilbits-microphone') !== 'off',
+      };
+    } catch {
+      return { speech: true, microphone: true };
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('lilbits-speech', wanted.speech ? 'on' : 'off');
+      sessionStorage.setItem('lilbits-microphone', wanted.microphone ? 'on' : 'off');
+    } catch {
+      /* The preference still applies for this visit. */
+    }
+  }, [wanted]);
   const autoStarted = useRef({ speech: false, microphone: false });
   useEffect(() => {
     // Re-arm after preview or a dev refresh tears down the audio devices.
@@ -84,13 +106,16 @@ export default function App() {
       autoStarted.current.speech = true;
       void speech.enable();
     }
+    // The microphone follows Sid's wish, not the page lifecycle. If he wants it on
+    // and a hot reload, restart, or lost socket switched it off, turn it back on.
+    // A permission or device error stops the retry until he toggles it himself.
     if (
       wanted.microphone &&
-      !autoStarted.current.microphone &&
       microphone.supported &&
       microphone.ready &&
       !microphone.enabled &&
-      !microphone.starting
+      !microphone.starting &&
+      !microphone.error
     ) {
       autoStarted.current.microphone = true;
       void microphone.enable();
@@ -146,8 +171,8 @@ export default function App() {
   ) {
     assertSendScope(room.runId ?? '', scope);
     setConversationAction({ status: 'idle' });
-    if (scope.revision === room.agents[id].snapshot.revision && intent === 'interrupt')
-      speech.stop();
+    // An explicit Interrupt from the composer still cancels the reply server-side,
+    // but playback of what was already spoken is left to the seats and Stop audio.
     await room.send(id, text, requestId, scope, intent);
   }
   async function deliverTranscript(text: string) {
@@ -186,12 +211,14 @@ export default function App() {
       text,
       targets,
       requestId: crypto.randomUUID(),
-      intent: 'interrupt' as const,
+      // Spoken turns queue behind a reply in progress instead of cancelling it.
+      // Sid chose this on 2026-11-04: no one is interrupted unless they choose to stop.
+      intent: 'queue' as const,
       delivered: new Set<AgentId>(),
     };
     const results = await Promise.allSettled(
       targets.map((target) =>
-        send(target, text, `${batch.requestId}-${target}`, batch, 'interrupt'),
+        send(target, text, `${batch.requestId}-${target}`, batch, 'queue'),
       ),
     );
     const failure = results.find(
@@ -324,6 +351,7 @@ export default function App() {
         <VoiceBand
           speech={speech}
           microphone={microphone}
+          voices={voices}
           preview={preview}
           hangout={!debate}
           names={{

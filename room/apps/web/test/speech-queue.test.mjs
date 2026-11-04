@@ -196,7 +196,7 @@ const segment = (agent) => ({
   test: true,
 });
 
-test('alternating voices are serialized through ended playback, not just synthesis completion', async () => {
+test('both seats speak at once on their own lanes; one seat still plays in order', async () => {
   const previousContext = globalThis.AudioContext,
     previousFetch = globalThis.fetch;
   const requests = [],
@@ -210,14 +210,21 @@ test('alternating voices are serialized through ended playback, not just synthes
   const queue = new SpeechQueue((state) => statuses.push(state), assert.fail);
   try {
     await queue.resume();
-    queue.enqueue([segment('a'), segment('b')]);
-    await until(() => started.length === 1);
-    assert.deepEqual(requests, ['a']);
-    started[0].stop();
+    queue.enqueue([segment('a'), segment('a'), segment('b')]);
+    // A and B both start without waiting for the other to finish.
     await until(() => started.length === 2);
-    assert.deepEqual(requests, ['a', 'b']);
-    started[1].stop();
+    assert.deepEqual(requests.toSorted(), ['a', 'b']);
+    assert.ok(statuses.includes('Speaking A and B'));
+    // A's second phrase waits for A's first to end, not for B.
+    assert.equal(requests.filter((agent) => agent === 'a').length, 1);
+    const [first, second] = started;
+    first.stop();
+    second.stop();
+    await until(() => started.length === 3);
+    assert.deepEqual(requests.toSorted(), ['a', 'a', 'b']);
+    started[2].stop();
     await until(() => statuses.some((s) => s.startsWith('Voice test complete')));
+    assert.equal(queue.isBusy, false);
   } finally {
     queue.close();
     globalThis.AudioContext = previousContext;
@@ -228,28 +235,31 @@ test('alternating voices are serialized through ended playback, not just synthes
 test('stop aborts network, drops backlog, and rejects late audio from old generation', async () => {
   const previousContext = globalThis.AudioContext,
     previousFetch = globalThis.fetch;
-  let release, signal;
+  const releases = [],
+    signals = [];
   const requests = [];
   started = [];
   globalThis.AudioContext = Context;
   globalThis.fetch = async (_, options) => {
     requests.push(JSON.parse(options.body).agent);
-    signal = options.signal;
+    signals.push(options.signal);
     return new Promise((resolve) => {
-      release = () => resolve(new Response(packet));
+      releases.push(() => resolve(new Response(packet)));
     });
   };
   const queue = new SpeechQueue(() => {}, assert.fail);
   try {
-    queue.enqueue([segment('a'), segment('b')]);
-    await until(() => release);
+    queue.enqueue([segment('a'), segment('a'), segment('b')]);
+    // Both lanes have one request in flight; A's second phrase is backlog.
+    await until(() => releases.length === 2);
     queue.stop();
-    assert.equal(signal.aborted, true);
-    release();
+    assert.ok(signals.every((signal) => signal.aborted));
+    for (const release of releases) release();
     await new Promise(setImmediate);
     await new Promise(setImmediate);
-    assert.deepEqual(requests, ['a']);
+    assert.deepEqual(requests.toSorted(), ['a', 'b']);
     assert.equal(started.length, 0);
+    assert.equal(queue.isBusy, false);
   } finally {
     queue.close();
     globalThis.AudioContext = previousContext;
@@ -346,12 +356,13 @@ test('silencing a speaker stops their active audio and queued phrases while the 
   const queue = new SpeechQueue(() => {}, assert.fail);
   try {
     queue.enqueue([segment('a'), segment('a'), segment('b')]);
-    await until(() => started.length === 1);
-    queue.silence('a');
+    // A's first phrase and B's phrase start together on separate lanes.
     await until(() => started.length === 2);
-    assert.deepEqual(requests, ['a', 'b']);
-    started[1].stop();
+    queue.silence('a');
+    // A's second phrase is dropped; B keeps playing until it ends on its own.
+    for (const source of started) source.stop();
     await until(() => !queue.isBusy);
+    assert.deepEqual(requests.toSorted(), ['a', 'b']);
   } finally {
     queue.close();
     globalThis.AudioContext = previousContext;

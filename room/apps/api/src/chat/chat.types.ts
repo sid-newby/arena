@@ -81,6 +81,12 @@ export interface TurnContext {
   toolVersion?: number;
   requiredToolVersion?: number;
   priorHistory?: HistoryTurn[];
+  /**
+   * Follow-ups Sid sends while this turn is running. A runtime that can read
+   * input mid-turn consumes them without cancelling the reply; a runtime that
+   * cannot ignores the inbox and the message waits for the turn to end.
+   */
+  inbox?: AsyncIterable<string> & { close(): void; readonly isClosed: boolean };
   controller: AbortController;
   append: (text: string) => void;
   saveSession: (session: string, toolVersion?: number) => void;
