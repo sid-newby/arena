@@ -69,6 +69,10 @@ describe('private agent-to-agent whispers', () => {
     expect(entry.mock.calls[0]![0].workspace).toContain('/.room/peer-whispers/');
     expect(contexts[0]).toMatchObject({ mode: 'side', tools: [] });
     expect(contexts[0]!.session).toBeUndefined();
+    expect(contexts[0]!.instructions).toContain(
+      'Honcho memory for private whispers with your peer is off here',
+    );
+    expect(contexts[0]!.refreshInstructions).toBe(true);
     expect(record.mock.calls.map((c) => [c[1].id, c[2].id, c[3]])).toEqual([
       [astra.id, fable.id, 'Private question.'],
       [fable.id, astra.id, 'Private answer.'],

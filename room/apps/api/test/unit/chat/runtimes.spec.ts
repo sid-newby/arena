@@ -120,13 +120,19 @@ it('supports Anthropic in either seat while preserving stable identities', async
 
 it('sends Fable the hangout identities in the Claude system prompt', async () => {
   session();
-  const instructions = hangoutInstructions('b', 'Fable', 'Astra');
-  await createRuntimes('/tmp').b.run({ ...context(), instructions });
+  const instructions = hangoutInstructions('b', 'Fable', 'Astra', false);
+  await createRuntimes('/tmp').b.run({ ...context(), instructions, refreshInstructions: true });
+  expect(instructions).toContain('Honcho memory for public room is off here');
   expect(instructions).toContain('You are Fable in seat B');
   expect(instructions).toContain('Astra is in seat A');
   expect(instructions).not.toMatch(/debate|opponent|competition/i);
   expect(fake.query).toHaveBeenCalledWith(
-    expect.objectContaining({ options: expect.objectContaining({ systemPrompt: instructions }) }),
+    expect.objectContaining({
+      options: expect.objectContaining({
+        resume: 'retained-session',
+        systemPrompt: { type: 'custom', prompt: instructions, snapshot: false },
+      }),
+    }),
   );
 });
 

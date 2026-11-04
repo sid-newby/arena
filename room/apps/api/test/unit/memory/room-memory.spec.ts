@@ -47,7 +47,13 @@ it('recovers only new public hangout messages after a failed export and restart,
     const chat = ChatService.forTest(
       store,
       {
-        a: runtime(store.runs.binding(id, 'a')),
+        a: runtime(store.runs.binding(id, 'a'), async (turn) => {
+          expect(turn.instructions).toContain(
+            'Honcho memory for private whispers with Sid is off here',
+          );
+          expect(turn.tools).toEqual([]);
+          turn.append('Private answer');
+        }),
         b: runtime(store.runs.binding(id, 'b')),
       },
       root,
@@ -139,6 +145,10 @@ it('recalls and exports each hangout whisper only through the client for the spe
   });
   const whispered: string[] = [];
   const whisper: AgentRuntime['run'] = async (turn) => {
+    expect(turn.refreshInstructions).toBe(true);
+    expect(turn.instructions).toContain(
+      'Honcho memory for private whispers with Sid is configured',
+    );
     whispered.push(turn.instructions!);
     expect(turn.tools?.map((tool) => tool.name)).toEqual(['recall_room']);
     await turn.tool('recall_room', { query: turn.text });

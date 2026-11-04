@@ -1,3 +1,4 @@
+import { ROOM_TOOL_VERSION } from '../../../src/chat/panel-presence.js';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -74,17 +75,30 @@ describe('Codex room tool sessions', () => {
     vi.unstubAllEnvs();
   });
 
-  it('sends Astra the hangout identities when Codex starts a thread', async () => {
-    const calls = protocol();
-    const instructions = hangoutInstructions('a', 'Astra', 'Fable');
-    await runCodex(context({ instructions }), workspace);
-    expect(instructions).toContain('You are Astra in seat A');
-    expect(instructions).toContain('Fable is in seat B');
-    expect(instructions).not.toMatch(/debate|opponent|competition/i);
-    expect(calls.find((call) => call.method === 'thread/start')).toMatchObject({
-      params: { baseInstructions: instructions },
-    });
-  });
+  it.each(['thread/start', 'thread/resume'] as const)(
+    'sends Astra the memory guide on %s',
+    async (method) => {
+      const calls = protocol();
+      const instructions = hangoutInstructions('a', 'Astra', 'Fable', true);
+      await runCodex(
+        context({
+          instructions,
+          ...(method === 'thread/resume'
+            ? { session: 'saved', toolVersion: ROOM_TOOL_VERSION }
+            : {}),
+        }),
+        workspace,
+      );
+      expect(instructions).toContain('Honcho memory for public room is configured');
+      expect(instructions).toContain('name: room-memory');
+      expect(instructions).toContain('You are Astra in seat A');
+      expect(instructions).toContain('Fable is in seat B');
+      expect(instructions).not.toMatch(/debate|opponent|competition/i);
+      expect(calls.find((call) => call.method === method)).toMatchObject({
+        params: { baseInstructions: instructions },
+      });
+    },
+  );
 
   it('registers expression tools on new sessions', async () => {
     const calls = protocol();

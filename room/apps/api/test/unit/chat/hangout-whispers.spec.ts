@@ -93,11 +93,17 @@ describe('hangout whisper delivery', () => {
   it('returns a private answer to its caller and keeps whisper contents out of all room-facing records', async () => {
     let offered: string[] = [];
     privateRun = async (ctx) => {
+      expect(ctx.instructions).toContain(
+        'Honcho memory for private whispers with your peer is configured',
+      );
+      expect(ctx.instructions).toContain('name: room-memory');
       offered = (ctx.tools ?? []).map((t) => t.name);
       await ctx.tool('recall_room', { query: 'secret-recall' });
       ctx.append('secret-answer');
     };
     const astra = await post('a');
+    expect(astra.instructions).toContain('Honcho memory for public room is configured');
+    expect(astra.refreshInstructions).toBe(true);
     expect(astra.tools?.map((t) => t.name)).toContain('whisper_peer');
     expect(JSON.parse(await astra.tool('whisper_peer', { text: 'secret-question' }))).toMatchObject(
       { reply: 'secret-answer', private: true },

@@ -74,6 +74,7 @@ export interface TurnContext {
   saveUsageBaseline?: (continuation: string, tokens: TokenCounts) => void;
   tools?: RuntimeToolDefinition[];
   instructions?: string;
+  refreshInstructions?: boolean;
   text: string;
   mode?: 'side';
   session?: string;

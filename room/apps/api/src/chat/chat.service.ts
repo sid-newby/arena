@@ -856,8 +856,10 @@ export class ChatService implements OnModuleDestroy {
                 modelName(
                   this.store.runs.binding(turn.run_id, agent === 'a' ? 'b' : 'a').config.model,
                 ),
+                Boolean(this.store.runs.memory),
               )
             : undefined,
+          refreshInstructions: hangout,
           session: savedSession,
           toolVersion: savedToolVersion,
           priorHistory:

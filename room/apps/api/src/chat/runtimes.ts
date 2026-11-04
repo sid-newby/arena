@@ -75,7 +75,10 @@ export async function runAnthropic(
       effort: anthropicEffort(selection.effort),
       cwd: workspace,
       env: providerEnvironment(),
-      systemPrompt: context.instructions ?? runtimeInstructions(role),
+      systemPrompt:
+        context.refreshInstructions && context.instructions
+          ? { type: 'custom', prompt: context.instructions, snapshot: false }
+          : (context.instructions ?? runtimeInstructions(role)),
       resume: context.session,
 
       includePartialMessages: true,
