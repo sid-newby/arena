@@ -14,6 +14,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, relative, resolve as resolvePath, sep } from 'node:path';
+import { hyperframesPluginRoot } from './hyperframes-plugin.js';
 import { privateProjectRoots } from '../workspaces/workspace-paths.js';
 import type { SeatWorkspace } from '../workspaces/workspace-manager.js';
 
@@ -35,7 +36,7 @@ export interface CommandOptions {
   maxOutputBytes?: number;
   stdin?: string;
   includeDependencies?: boolean;
-  live?: 'files' | 'command';
+  live?: 'files' | 'command' | 'shell';
 }
 const quote = (value: string) => JSON.stringify(value);
 export function sandboxProfile(workspace: SeatWorkspace): string {
@@ -176,22 +177,83 @@ async function projectSnapshot(
 
 // pnpm exposes its installed executable to the API it launches. Keep the live room's
 // package-manager version available independently of the user's shell shims.
-function installedPnpmBin() {
+function installedPnpmExecutable() {
   const executable = process.env.npm_execpath;
   return executable &&
     /\/(?:pnpm\/bin\/pnpm\.native|@pnpm\/exe\.darwin-(?:arm64|x64)\/pnpm)$/.test(executable) &&
     existsSync(executable)
-    ? dirname(realpathSync(executable))
+    ? realpathSync(executable)
     : undefined;
 }
-function liveProfile(root: string, scratch: string, files: boolean, pnpmBin?: string) {
+function containsPath(root: string, path: string) {
+  return root === path || path.startsWith(root + sep);
+}
+
+function shellPolicy(root: string, scratch: string, privateRoots: string[]) {
+  // sandbox-exec uses POSIX regexes. Match the same case-insensitive components as
+  // the file tools, including after moving a directory into the command's scratch.
+  const patterns = [LIVE_PROTECTED_PART, '[^/]*' + LIVE_PROTECTED_SUFFIX]
+    .map((part) =>
+      ('/(' + part + ')(/|$)').replace(
+        /[a-z]/gi,
+        (letter) => '[' + letter.toLowerCase() + letter.toUpperCase() + ']',
+      ),
+    )
+    .map((part) => '#"' + part + '"')
+    .join(' ');
+  const ancestors = new Set([root]);
+  for (const privateRoot of privateRoots) {
+    let ancestor = dirname(privateRoot);
+    while (containsPath(root, ancestor) && !ancestors.has(ancestor)) {
+      ancestors.add(ancestor);
+      ancestor = dirname(ancestor);
+    }
+  }
+  // pnpm's native CLI coordinates installs via per-user lock directories under
+  // /tmp even when TMPDIR, HOME and the package store all point into scratch.
+  const uid = process.getuid?.();
+  const lockDirs = [
+    'dir-locks',
+    'store-operation-locks',
+    'verify-deps-install-locks',
+    'modules-swaps',
+  ]
+    .map((name) => '(subpath ' + quote('/private/tmp/pnpm-' + name + '-' + uid) + ')')
+    .join(' ');
+  const ports = new Set([58241, 58242, Number(process.env.PORT ?? 3000)]);
+  return `(allow network-outbound (remote ip))
+(allow network-inbound network-bind (local ip "localhost:*"))
+(allow network-outbound (literal "/private/var/run/mDNSResponder"))
+(allow file-read* file-write-create file-write-data file-write-mode file-write-unlink ${lockDirs})
+(allow file-read-metadata (literal "/tmp") (literal "/private/tmp") (literal "/var") (literal "/etc"))
+(allow mach-lookup (global-name "com.apple.SystemConfiguration.DNSConfiguration") (global-name "com.apple.dnssd.service") (global-name "com.apple.system.opendirectoryd.libinfo") (global-name "com.apple.SystemConfiguration.SCNetworkReachability"))
+(allow file-read* (literal "/Library/Preferences/com.apple.networkd.plist") (literal "/private/etc/hosts") (literal "/private/etc/resolv.conf") (literal "/private/var/run/resolv.conf") (literal "/private/etc/ssl/cert.pem"))
+(deny network-outbound ${[...ports]
+    .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535)
+    .map((port) => '(remote tcp "*:' + port + '")')
+    .join(' ')})
+(deny file-read* file-map-executable process-exec file-write* file-link
+  (require-all (require-any (subpath ${quote(root)}) (subpath ${quote(scratch)})) (regex ${patterns}))
+  ${privateRoots.map((path) => '(subpath ' + quote(path) + ')').join(' ')})
+(deny file-write-unlink ${[...ancestors].map((path) => '(literal ' + quote(path) + ')').join(' ')})`;
+}
+
+function liveProfile(
+  root: string,
+  scratch: string,
+  mode: NonNullable<CommandOptions['live']>,
+  pnpm?: string,
+  pluginRoot?: string,
+  privateRoots: string[] = [],
+) {
   const node = realpathSync(process.execPath);
   // Homebrew applications resolve into Cellar, not user/home config. System executables
   // need dyld/SDK data; they do not need access to the project owner's home or credentials.
   const reads = [
     root,
     scratch,
-    ...(pnpmBin ? [pnpmBin] : []),
+    ...(pnpm && mode !== 'shell' ? [dirname(pnpm)] : []),
+    ...(pluginRoot ? [pluginRoot] : []),
     '/System/Library',
     '/usr/bin',
     '/usr/lib',
@@ -207,6 +269,7 @@ function liveProfile(root: string, scratch: string, files: boolean, pnpmBin?: st
   ];
   const literals = [
     node,
+    ...(pnpm ? [pnpm] : []),
     '/dev/null',
     '/dev/zero',
     '/dev/urandom',
@@ -214,6 +277,17 @@ function liveProfile(root: string, scratch: string, files: boolean, pnpmBin?: st
     '/dev/fd',
     '/private/etc/localtime',
     '/private/var/select/sh',
+    ...(mode === 'shell'
+      ? [
+          '/opt/homebrew/bin/npm',
+          '/opt/homebrew/bin/npx',
+          '/opt/homebrew/etc/openssl@3/openssl.cnf',
+          '/opt/homebrew/etc/openssl@3/cert.pem',
+          '/opt/homebrew/etc/ca-certificates/cert.pem',
+          '/opt/homebrew/bin/ffmpeg',
+          '/opt/homebrew/bin/ffprobe',
+        ]
+      : []),
     '/opt/homebrew/bin/node',
     '/opt/homebrew/bin/task',
     '/opt/homebrew/bin/pnpm',
@@ -242,11 +316,13 @@ function liveProfile(root: string, scratch: string, files: boolean, pnpmBin?: st
 (allow process-fork)
 (allow process-exec file-read* file-map-executable ${readable})
 (allow file-read-metadata ${[...parents].map((p) => '(literal ' + quote(p) + ')').join(' ')})
-(allow file-write* (subpath ${quote(scratch)}) ${files ? '(subpath ' + quote(root) + ')' : ''} (literal "/dev/null"))
+(allow file-write* (subpath ${quote(scratch)}) ${mode !== 'command' ? '(subpath ' + quote(root) + ')' : ''} (literal "/dev/null"))
 (allow sysctl-read)
 (allow signal process-info* (target self))
 (deny file-write-flags file-write-acl)
-(deny network*)`;
+${mode === 'shell' ? shellPolicy(root, scratch, privateRoots) : '(deny network*)'}
+${pluginRoot ? '(allow file-read* (subpath ' + quote(pluginRoot) + '))' : ''}
+${pnpm && mode === 'shell' ? '(allow file-read* file-map-executable process-exec (literal ' + quote(pnpm) + '))' : ''}`;
 }
 
 export class CommandSandbox {
@@ -284,12 +360,14 @@ export class CommandSandbox {
     const directory = realpathSync(await mkdtemp(join(tmpdir(), 'arena-project-')));
     try {
       const files = options.live === 'files';
-      const project = files ? root : join(directory, 'project');
+      const shell = options.live === 'shell';
+      const project = options.live === 'command' ? join(directory, 'project') : root;
+      const privateRoots = shell ? privateProjectRoots() : [];
       const home = join(directory, 'home');
       const temp = join(directory, 'tmp');
       await mkdir(home, { mode: 0o700 });
       await mkdir(temp, { mode: 0o700 });
-      if (!files) {
+      if (options.live === 'command') {
         if (directory === root || directory.startsWith(root + sep))
           throw new Error('The command scratch directory must be outside the attached project.');
         const deadline = AbortSignal.timeout(60_000);
@@ -300,13 +378,35 @@ export class CommandSandbox {
           options.signal ? AbortSignal.any([options.signal, deadline]) : deadline,
         );
       }
-      const cwd = files ? root : join(project, relative(root, options.cwd));
-      const pnpmBin = installedPnpmBin();
+      const cwd = shell
+        ? realpathSync(options.cwd)
+        : files
+          ? root
+          : join(project, relative(root, options.cwd));
+      if (
+        shell &&
+        (!containsPath(root, cwd) ||
+          protectedProjectPath(relative(root, cwd)) ||
+          privateRoots.some((path) => containsPath(path, cwd)))
+      ) {
+        throw new Error('Shell working directory is outside the accessible project.');
+      }
+      const pnpm = installedPnpmExecutable();
+      const pluginRoot = shell ? hyperframesPluginRoot() : undefined;
+      // An inaccessible PATH entry returns EPERM from posix_spawnp, preventing
+      // Node subprocesses (including npx) from finding later valid binaries.
+      const shellBin = join(directory, 'bin');
+      if (shell) {
+        await mkdir(shellBin);
+        await symlink(realpathSync(process.execPath), join(shellBin, 'node'));
+        if (pnpm) await symlink(pnpm, join(shellBin, 'pnpm'));
+      }
       return await this.spawn(
         { ...options, cwd },
-        liveProfile(project, directory, files, pnpmBin),
+        liveProfile(project, directory, options.live!, pnpm, pluginRoot, privateRoots),
         {
-          pnpmBin,
+          pnpmBin: shell ? shellBin : pnpm && dirname(pnpm),
+          pluginRoot,
           home,
           temp,
         },
@@ -319,7 +419,7 @@ export class CommandSandbox {
   private spawn(
     options: CommandOptions,
     profile: string,
-    scratch?: { home: string; temp: string; pnpmBin?: string },
+    scratch?: { home: string; temp: string; pnpmBin?: string; pluginRoot?: string },
   ): Promise<CommandResult> {
     const executableDirectory = dirname(realpathSync(process.execPath));
     return new Promise((resolve, reject) => {
@@ -328,9 +428,9 @@ export class CommandSandbox {
         detached: true,
         env: {
           PATH: [
-            executableDirectory,
-            scratch?.pnpmBin,
-            '/opt/homebrew/bin',
+            ...(options.live === 'shell'
+              ? [scratch?.pnpmBin, '/opt/homebrew/bin', executableDirectory]
+              : [executableDirectory, scratch?.pnpmBin, '/opt/homebrew/bin']),
             '/usr/bin',
             '/bin',
             '/usr/sbin',
@@ -343,8 +443,20 @@ export class CommandSandbox {
           ...(scratch
             ? {
                 XDG_CACHE_HOME: join(scratch.home, 'cache'),
-                COREPACK_ENABLE_NETWORK: '0',
-                npm_config_offline: 'true',
+                ...(options.live === 'shell'
+                  ? {
+                      ...(scratch.pluginRoot
+                        ? {
+                            HYPERFRAMES_PLUGIN_ROOT: scratch.pluginRoot,
+                            HYPERFRAMES_CACHE_DIR: join(scratch.home, 'hyperframes-cache'),
+                          }
+                        : {}),
+                      PNPM_HOME: join(scratch.home, 'pnpm'),
+                      npm_config_store_dir: join(scratch.home, 'pnpm-store'),
+                      npm_config_cache: join(scratch.home, 'npm-cache'),
+                      PNPM_CONFIG_STORE_DIR: join(scratch.home, 'pnpm-store'),
+                    }
+                  : { COREPACK_ENABLE_NETWORK: '0', npm_config_offline: 'true' }),
               }
             : {}),
           LANG: 'en_US.UTF-8',

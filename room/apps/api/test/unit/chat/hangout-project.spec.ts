@@ -92,8 +92,8 @@ describe('hangout shared project', () => {
   it('offers stable project tools to both public seats and binds every call to Sid’s selection', async () => {
     const unattached = await turn('a', 'no-project');
     const tools = unattached.tools!.map((tool) => tool.name);
-    expect(tools).toContain('project_read');
-    await expect(unattached.tool('project_read', { path: 'code.ts' })).rejects.toThrow(
+    expect(tools).toEqual(expect.arrayContaining(['project_read', 'project_shell']));
+    await expect(unattached.tool('project_shell', { command: 'pwd' })).rejects.toThrow(
       /not attached/,
     );
     await finish();
@@ -106,19 +106,20 @@ describe('hangout shared project', () => {
       expect(context.tools!.map((tool) => tool.name)).toEqual(tools);
       expect(context.requiredToolVersion).toBe(HANGOUT_TOOL_VERSION);
       expect(context.instructions).toContain(JSON.stringify(project));
+      expect(context.instructions).toContain('project_shell');
       expect(() => chat.detachHangoutProject()).toThrow(/finish before changing/);
       await expect(context.tool('project_attach', { path: dir })).rejects.toThrow(/unavailable/);
-      expect(await context.tool('project_read', { path: 'private-input' })).toBe(
+      expect(await context.tool('project_shell', { command: 'private-input' })).toBe(
         'private-file-result',
       );
       expect(broker).toHaveBeenLastCalledWith(
         project,
-        'project_read',
-        { path: 'private-input' },
+        'project_shell',
+        { command: 'private-input' },
         context.controller.signal,
       );
       await finish();
-      await expect(context.tool('project_read', { path: 'old-turn' })).rejects.toThrow(
+      await expect(context.tool('project_shell', { command: 'pwd' })).rejects.toThrow(
         /unavailable/,
       );
     }

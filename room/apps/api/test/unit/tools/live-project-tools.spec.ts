@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { LiveProjectTools } from '../../../src/tools/tool-broker.js';
 
 describe.skipIf(process.platform !== 'darwin' || process.env.ROOM_SANDBOX_TESTS !== '1')(
@@ -50,6 +51,36 @@ describe.skipIf(process.platform !== 'darwin' || process.env.ROOM_SANDBOX_TESTS 
       expect(edits.map((e) => e.status)).toEqual(['fulfilled', 'rejected']);
       expect(readFileSync(join(root, 'hook'), 'utf8')).toBe('two');
       expect(statSync(join(root, 'hook')).mode & 0o777).toBe(0o751);
+    });
+    it('runs shell pipelines in the real checkout and can fetch a local service', async () => {
+      const cwd = 'src';
+      mkdirSync(join(root, cwd));
+      const server = createHttpServer((_request, response) => response.end('local-service'));
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      try {
+        const address = server.address();
+        if (!address || typeof address === 'string') throw new Error('Missing address.');
+        const result = JSON.parse(
+          await call('project_shell', {
+            cwd,
+            command: `node -e "fetch('http://127.0.0.1:${address.port}').then(r=>r.text()).then(console.log)" > result && cat result | tr 'a-z' 'A-Z'`,
+          }),
+        );
+        expect(result).toMatchObject({ exitCode: 0, stdout: 'LOCAL-SERVICE\n', stderr: '' });
+        expect(readFileSync(join(root, cwd, 'result'), 'utf8')).toBe('local-service\n');
+        await expect(call('project_shell', { cwd: '..', command: 'pwd' })).rejects.toThrow(
+          /outside/,
+        );
+        await expect(call('project_shell', { command: '  ' })).rejects.toThrow(/non-empty/);
+        await expect(
+          call('project_shell', { command: 'pwd', includeDependencies: true }),
+        ).rejects.toThrow(/unsupported/);
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
     it('hides the configured managed root without hiding application modules named workspaces', async () => {
       const privateDirectory = join(root, 'workspaces');

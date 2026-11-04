@@ -297,7 +297,7 @@ class WorkspaceTools {
     workspace: SeatWorkspace,
     input: Record<string, unknown>,
     signal?: AbortSignal,
-    live = false,
+    live?: 'command' | 'shell',
   ): Promise<string> {
     if (
       !Array.isArray(input.argv) ||
@@ -332,7 +332,7 @@ class WorkspaceTools {
         cwd,
         timeoutMs,
         signal,
-        live: live ? 'command' : undefined,
+        live,
         includeDependencies: input.includeDependencies !== false,
       }),
     );
@@ -443,6 +443,7 @@ const liveNames: Record<string, string> = {
   project_write: 'write_file',
   project_patch: 'patch_file',
   project_run: 'run_command',
+  project_shell: 'run_command',
 };
 const liveDescriptions: Record<string, string> = {
   project_list: 'List entries in the shared project directory.',
@@ -452,6 +453,8 @@ const liveDescriptions: Record<string, string> = {
     'Create a new UTF-8 file, or replace an existing file using its most recent expectedSha256 from project_read.',
   project_patch:
     'Replace one exact unique occurrence in a UTF-8 file. Provide expectedSha256 from project_read.',
+  project_shell:
+    'Run a /bin/sh command in the attached checkout. Writes persist. Network and local services are available. cwd is relative to the project root.',
   project_run:
     'Run argv on a disposable project copy with temp/cache output. No source changes are retained. Protected paths, hardlinks and network are unavailable.',
 };
@@ -460,6 +463,10 @@ export class LiveProjectTools extends WorkspaceTools {
   definitions(): BrokerToolDefinition[] {
     return Object.entries(liveNames).map(([name, source]) => {
       const entry = structuredClone(definitions.find((definition) => definition.name === source)!);
+      if (name === 'project_shell') {
+        const { cwd, timeoutMs } = entry.inputSchema.properties as Record<string, unknown>;
+        entry.inputSchema = schema({ command: { type: 'string' }, cwd, timeoutMs }, ['command']);
+      }
       if (name === 'project_run')
         entry.inputSchema = schema(
           {
@@ -515,15 +522,26 @@ export class LiveProjectTools extends WorkspaceTools {
       readOnlyRoots: [],
     };
     const operation = liveNames[name]!;
-    if (name === 'project_run') return this.command(workspace, input, signal, true);
+    if (name === 'project_run') return this.command(workspace, input, signal, 'command');
     const execute = async () => {
       signal?.throwIfAborted();
       const now = statSync(root);
       if (realpathSync(root) !== canonical || now.dev !== identity.dev || now.ino !== identity.ino)
         throw new Error('The attached project path changed.');
+      if (name === 'project_shell') {
+        const command = text(input, 'command');
+        if (!command.trim()) throw new Error('Provide a non-empty shell command.');
+        return this.command(
+          workspace,
+          { ...input, argv: ['/bin/sh', '-c', command] },
+          signal,
+          'shell',
+        );
+      }
       return JSON.stringify(await this.file(workspace, operation, input, signal, true));
     };
-    if (name !== 'project_write' && name !== 'project_patch') return execute();
+    if (name !== 'project_write' && name !== 'project_patch' && name !== 'project_shell')
+      return execute();
     const result = (this.pending.get(canonical) ?? Promise.resolve()).then(execute);
     const tail = result.then(
       () => {},

@@ -213,24 +213,24 @@ describe('Codex room tool sessions', () => {
     },
   );
 
-  it('migrates an existing public hangout once for shared project tools and resumes the upgraded session', async () => {
+  it('upgrades the previous public hangout toolset for project_shell and resumes the upgraded session', async () => {
     const calls = protocol();
     const tools = [
       {
-        name: 'project_read',
-        description: 'Read project file',
-        inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+        name: 'project_shell',
+        description: 'Run a shell command in the project',
+        inputSchema: { type: 'object', properties: { command: { type: 'string' } } },
       },
     ];
     const turn = context({
       session: 'old-session',
-      toolVersion: ROOM_TOOL_VERSION,
+      toolVersion: 8,
       requiredToolVersion: HANGOUT_TOOL_VERSION,
       tools,
     });
     await runCodex(turn, workspace);
     expect(calls.find((call) => call.method === 'thread/start')?.params).toMatchObject({
-      dynamicTools: [expect.objectContaining({ name: 'project_read' })],
+      dynamicTools: [expect.objectContaining({ name: 'project_shell' })],
     });
     expect(turn.saveSession).toHaveBeenCalledWith('new-session', HANGOUT_TOOL_VERSION);
     const resumed = protocol();

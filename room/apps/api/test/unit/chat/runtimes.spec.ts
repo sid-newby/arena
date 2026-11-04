@@ -1,5 +1,6 @@
 import type { TurnContext } from '../../../src/chat/chat.types.js';
 import type { SdkMcpToolDefinition, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { LiveProjectTools } from '../../../src/tools/tool-broker.js';
 import { recallTool } from '../../../src/memory/room-memory.js';
 import { hangoutInstructions } from '../../../src/chat/runtime-tools.js';
 import { DEFAULT_MODELS } from '../../../src/runs/run.contract.js';
@@ -13,6 +14,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async (original) => {
   return { ...sdk, query: fake.query, createSdkMcpServer: fake.createServer };
 });
 vi.mock('node:child_process', () => ({
+  execFile: vi.fn<typeof import('node:child_process').execFile>(),
   execFileSync: vi.fn<() => string>(
     () => '{"loggedIn":true,"authMethod":"oauth_token","apiProvider":"firstParty"}',
   ),
@@ -135,6 +137,22 @@ it('sends Fable the hangout identities in the Claude system prompt', async () =>
     }),
   );
 });
+
+it.each([undefined, 'retained-session'])(
+  'exposes the live shell on a public Fable seat with session %s',
+  async (sessionId) => {
+    session();
+    const turn = { ...context(), session: sessionId, tools: new LiveProjectTools().definitions() };
+    await runAnthropic(turn, '/tmp', DEFAULT_MODELS.b, 'b');
+    const server = fake.createServer.mock.calls[0][0] as { tools: SdkMcpToolDefinition[] };
+    const shell = server.tools.find((entry) => entry.name === 'project_shell')!;
+    expect(fake.query).toHaveBeenCalledWith(
+      expect.objectContaining({ options: expect.objectContaining({ resume: sessionId }) }),
+    );
+    await shell.handler({ command: 'pwd' }, {});
+    expect(turn.tool).toHaveBeenCalledWith('project_shell', { command: 'pwd' });
+  },
+);
 
 it('makes private recall the only tool available to the Claude whisper session', async () => {
   session();
