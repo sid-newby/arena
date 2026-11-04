@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Headers,
+  HttpCode,
   Inject,
   Param,
   Post,
@@ -86,6 +87,36 @@ export class RunController {
   @Post(':runId/agents/:id/turns')
   submit(@Param('runId') runId: string, @Param('id') id: string, @Body() body: unknown) {
     return this.chat.submit(this.chat.agent(id), body, runId);
+  }
+  @Post(':runId/agents/:id/messages')
+  @HttpCode(202)
+  message(@Param('runId') runId: string, @Param('id') id: string, @Body() body: unknown) {
+    return this.chat.submitMessage(this.chat.agent(id), body, runId);
+  }
+  @Delete(':runId/agents/:id/messages/:messageId')
+  cancelMessage(
+    @Param('runId') runId: string,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+  ) {
+    return this.chat.cancelMessage(this.chat.agent(id), runId, messageId);
+  }
+  @Get(':runId/agents/:id/side-conversation')
+  side(@Param('runId') runId: string, @Param('id') id: string) {
+    return this.chat.sideSnapshot(runId, this.chat.agent(id));
+  }
+  @Post(':runId/agents/:id/side-conversation')
+  @HttpCode(202)
+  submitSide(@Param('runId') runId: string, @Param('id') id: string, @Body() body: unknown) {
+    return this.chat.submitSide(runId, this.chat.agent(id), body);
+  }
+  @Delete(':runId/agents/:id/side-conversation/turns/current')
+  stopSide(@Param('runId') runId: string, @Param('id') id: string) {
+    return this.chat.stopSide(runId, this.chat.agent(id));
+  }
+  @Sse(':runId/agents/:id/side-conversation/events')
+  sideEvents(@Param('runId') runId: string, @Param('id') id: string) {
+    return this.chat.sideEvents(runId, this.chat.agent(id));
   }
   @Delete(':runId/agents/:id/turns/current')
   stop(@Param('runId') runId: string, @Param('id') id: string) {

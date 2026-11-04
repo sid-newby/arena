@@ -15,6 +15,9 @@ export class MaestroController {
       this.chat.events('a', runId).pipe(map(({ data }) => ({ type: 'a', data }))),
       this.chat.events('b', runId).pipe(map(({ data }) => ({ type: 'b', data }))),
       this.maestro.events(runId).pipe(map(({ data }) => ({ type: 'maestro', data }))),
+      this.chat.sideEvents(runId, 'a').pipe(map(({ data }) => ({ type: 'side-a', data }))),
+      this.chat.sideEvents(runId, 'b').pipe(map(({ data }) => ({ type: 'side-b', data }))),
+      this.chat.workflowEvents(runId).pipe(map(({ data }) => ({ type: 'workflow', data }))),
     );
   }
   @Get()

@@ -1,4 +1,5 @@
 import { canInitializeProject, projectPath } from '../workspaces/project-directory.js';
+import { validateEvidenceFolder } from '../workspaces/evidence-folder.js';
 import { discoverScaffolds } from '../scaffolds/scaffold-discovery.controller.js';
 import { scaffoldRoot, templateDigest } from '../scaffolds/scaffold-seed.js';
 import { workspacePaths } from '../workspaces/workspace-paths.js';
@@ -97,6 +98,20 @@ export async function inspectPreflight(input: {
   };
   const [a, b] = await Promise.all(DEBATE_SEATS.map(seatCheck));
   let source: PreflightResult['source'] = { ok: true, detail: 'No source repository selected.' };
+  if (input.task.evidenceFolder) {
+    try {
+      validateEvidenceFolder(input.controlRoot, input.managedRoot, input.task.evidenceFolder);
+      source = {
+        ok: true,
+        detail: 'Both seats will receive the current files in the evidence folder.',
+      };
+    } catch (error) {
+      source = {
+        ok: false,
+        detail: error instanceof Error ? error.message : 'Cannot read the evidence folder.',
+      };
+    }
+  }
   if (input.task.source) {
     try {
       if (!isAbsolute(input.task.source.repository))

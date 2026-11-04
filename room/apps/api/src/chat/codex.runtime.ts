@@ -1,3 +1,4 @@
+import { UnconfirmedCancellationError } from './runtime-cancellation.js';
 import { CodexUsageTracker } from '../state/provider-usage.js';
 import { spawnSync } from 'node:child_process';
 import type { ParticipantRole, ProviderConfig } from '../runs/run.contract.js';
@@ -45,6 +46,9 @@ export async function runCodex(
   let successful = false;
   let turnId: string | undefined;
   let threadId = context.session;
+  let startingTurn = false,
+    terminalSeen = false;
+  let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
   let resolveCompletion!: () => void;
   let rejectCompletion!: (error: Error) => void;
   const completed = new Promise<void>((resolve, reject) => {
@@ -57,10 +61,14 @@ export async function runCodex(
     if (typeof params.threadId === 'string' && threadId && params.threadId !== threadId) return;
     if (method === 'item/agentMessage/delta' && typeof params.delta === 'string')
       context.append(params.delta);
-    if (method === 'turn/started') turnId = String(protocolObject(params.turn).id);
+    if (method === 'turn/started') {
+      turnId = String(protocolObject(params.turn).id);
+      if (context.controller.signal.aborted) interrupt();
+    }
     if (method === 'turn/completed') {
       const turn = protocolObject(params.turn);
       if (turnId && turn.id !== turnId) return;
+      terminalSeen = true;
       providerDuration = turn.durationMs;
       successful = turn.status === 'completed';
       if (successful) resolveCompletion();
@@ -74,15 +82,28 @@ export async function runCodex(
         );
     }
   };
+  const interrupt = () => {
+    if (threadId && turnId && !terminalSeen)
+      void client.request('turn/interrupt', { threadId, turnId }).catch(() => {
+        if (!terminalSeen) rejectCompletion(new UnconfirmedCancellationError());
+      });
+  };
   const abort = () => {
-    if (threadId && turnId) client.send({ method: 'turn/interrupt', params: { threadId, turnId } });
-    rejectCompletion(new Error('Reply stopped.'));
-    client.close();
+    if (!startingTurn) {
+      rejectCompletion(new Error('Reply stopped.'));
+      return;
+    }
+    interrupt();
+    cancellationTimer ??= setTimeout(
+      () => rejectCompletion(new UnconfirmedCancellationError()),
+      5000,
+    );
   };
   context.controller.signal.addEventListener('abort', abort, { once: true });
   try {
     context.controller.signal.throwIfAborted();
     await client.initialize();
+    context.controller.signal.throwIfAborted();
     const config = {
       model: selection.model,
       modelProvider: 'openai',
@@ -98,8 +119,11 @@ export async function runCodex(
         'features.apps': false,
         'features.browser_use': false,
         'features.image_generation': false,
-        web_search: 'live',
-        'mcp_servers.context7': { url: 'https://mcp.context7.com/mcp' },
+        web_search: context.mode === 'side' ? 'disabled' : 'live',
+        'mcp_servers.context7':
+          context.mode === 'side'
+            ? { enabled: false, url: 'https://mcp.context7.com/mcp' }
+            : { url: 'https://mcp.context7.com/mcp' },
       },
     };
     const migrateSession = Boolean(
@@ -147,7 +171,9 @@ export async function runCodex(
       ]);
       if (items.length) await client.request('thread/inject_items', { threadId, items });
     }
+    context.controller.signal.throwIfAborted();
     context.saveSession(threadId, ROOM_TOOL_VERSION);
+    startingTurn = true;
     await client.request('turn/start', {
       threadId,
       model: selection.model,
@@ -156,7 +182,12 @@ export async function runCodex(
       summary: 'auto',
     });
     await Promise.race([completed, client.failure]);
+  } catch (error) {
+    if (context.controller.signal.aborted && startingTurn && !terminalSeen)
+      throw new UnconfirmedCancellationError();
+    throw error;
   } finally {
+    clearTimeout(cancellationTimer);
     usage.finish(successful, providerDuration);
     context.controller.signal.removeEventListener('abort', abort);
     client.close();

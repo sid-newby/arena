@@ -77,11 +77,12 @@ are separate from A/B messages. Opening, closing, sending, or stopping Maestro
 does not stop A/B work or change speech playback. Publication requires an explicit
 user action on a reviewed proposal.
 
-The Run tab reviews the question, success criteria, shared grounding, expected
-artifact, subscribed seat models, source commit, tool profile, handoff limit, and
-total time limit. Preparation gives A and B separate retained worktrees or scratch
-directories and checks that contained tools can start. Preparation does not start
-inference. Both independent outputs must finish before explicit comparison or
+The Run tab starts a read-only debate from a question and an optional evidence
+folder. One Start debate action saves the setup, prepares both seats, and starts
+independent work. The folder can contain uncommitted files or have no Git
+history. Both seats receive the same snapshot. Advanced settings cover success
+criteria, models, pinned commits, build tools, and time and handoff limits.
+Both independent outputs must finish before explicit comparison or
 discussion. Pausing waits for an output boundary; Stop aborts active A/B work.
 Interrupted work never replays automatically, and failed candidates require an
 explicit retry selection.

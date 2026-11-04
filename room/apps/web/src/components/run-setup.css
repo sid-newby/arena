@@ -131,24 +131,6 @@
   gap: 9px;
   padding: 6px 0 20px;
 }
-.run-steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-.run-steps button {
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  font: inherit;
-}
-.run-steps button[aria-current='step'] {
-  border-color: var(--primary);
-  color: var(--foreground);
-}
 .run-editor form > div:not([hidden]):not(.run-buttons) > * + * {
   margin-top: 10px;
 }
@@ -545,4 +527,20 @@
 .run-outcome li {
   margin-top: 8px;
   overflow-wrap: anywhere;
+}
+
+.run-advanced {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.run-advanced-fields {
+  display: grid;
+  gap: 18px;
+}
+.run-advanced-fields > div > * + *,
+.run-advanced-fields > fieldset > * + * {
+  margin-top: 10px;
+}
+.run-advanced-fields fieldset {
+  min-width: 0;
 }

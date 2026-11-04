@@ -98,9 +98,9 @@ type FolderPage = {
 
 const folderStartKey = 'lilbits-folder-start';
 
-function rememberedFolder(): string | undefined {
+function rememberedFolder(key: string): string | undefined {
   try {
-    return localStorage.getItem(folderStartKey) || undefined;
+    return localStorage.getItem(key) || undefined;
   } catch {
     return undefined;
   }
@@ -147,14 +147,19 @@ function parseFolderPage(value: unknown): FolderPage {
 export function RepositoryBrowser({
   onSelect,
   onClose,
+  evidence = false,
 }: {
   onSelect: (path: string) => void;
   onClose: () => void;
+  evidence?: boolean;
 }) {
   const [page, setPage] = useState<FolderPage>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
-  const [requested, setRequested] = useState<string | undefined>(rememberedFolder);
+  const storageKey = evidence ? 'lilbits-evidence-folder-start' : folderStartKey;
+  const [requested, setRequested] = useState<string | undefined>(() =>
+    rememberedFolder(storageKey),
+  );
   const initialFolder = useRef(requested);
   const folderNameId = useId();
   const [newFolder, setNewFolder] = useState(false);
@@ -162,7 +167,11 @@ export function RepositoryBrowser({
   const [creating, setCreating] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    const query = requested ? `?${new URLSearchParams({ path: requested })}` : '';
+    const query = requested
+      ? `?${new URLSearchParams({ path: requested })}`
+      : evidence
+        ? '?purpose=evidence'
+        : '';
     void api(`/api/runs/repositories/browse${query}`, parseFolderPage, {
       signal: controller.signal,
     })
@@ -182,7 +191,7 @@ export function RepositoryBrowser({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [requested]);
+  }, [requested, evidence]);
   function navigate(path: string) {
     initialFolder.current = undefined;
     setError(undefined);
@@ -227,7 +236,7 @@ export function RepositoryBrowser({
         <>
           <p className="run-folder-path">{page.path}</p>
           <p className="run-muted">
-            {page.hasGitMarker
+            {!evidence && page.hasGitMarker
               ? 'Git repository detected.'
               : 'Select this folder, or open a subfolder.'}
           </p>
@@ -243,15 +252,17 @@ export function RepositoryBrowser({
             >
               Parent folder
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setNewFolder(true)}>
-              New folder
-            </Button>
+            {!evidence && (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setNewFolder(true)}>
+                New folder
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
               onClick={() => {
                 try {
-                  localStorage.setItem(folderStartKey, page.parent ?? page.path);
+                  localStorage.setItem(storageKey, page.parent ?? page.path);
                 } catch {
                   // The selection remains available for this run.
                 }

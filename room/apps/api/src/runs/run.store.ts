@@ -27,6 +27,7 @@ export class RunStore {
     private readonly db: DatabaseSync,
     private readonly transaction: Transaction,
     private readonly workspace: string,
+    private readonly changed: (runId: string) => void = () => {},
   ) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,kind TEXT NOT NULL,state TEXT NOT NULL,revision INTEGER NOT NULL,created_at INTEGER NOT NULL);
@@ -344,11 +345,14 @@ export class RunStore {
     turnId: string | null,
     payload: Record<string, unknown>,
   ) {
-    this.db
-      .prepare(
-        'INSERT INTO correspondence(run_id,kind,role,turn_id,payload,created_at) VALUES (?,?,?,?,?,?)',
-      )
-      .run(runId, kind, role, turnId, JSON.stringify(payload), Date.now());
+    this.transaction(() => {
+      this.db
+        .prepare(
+          'INSERT INTO correspondence(run_id,kind,role,turn_id,payload,created_at) VALUES (?,?,?,?,?,?)',
+        )
+        .run(runId, kind, role, turnId, JSON.stringify(payload), Date.now());
+      this.changed(runId);
+    });
   }
   cursor(runId: string): number {
     return Number(
