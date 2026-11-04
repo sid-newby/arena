@@ -57,7 +57,20 @@ describe('Durable seat messages', () => {
       store,
       { a: factory(store.runs.binding(runId, 'a')), b: factory(store.runs.binding(runId, 'b')) },
       root,
-      { runtimeFactory: factory },
+      {
+        runtimeFactory: factory,
+        catalogReader: async (provider) => ({
+          provider,
+          status: 'ready',
+          models: [
+            {
+              id: provider === 'codex' ? 'gpt-6-luna' : 'claude-opus-5-5',
+              name: 'test',
+              efforts: ['high'],
+            },
+          ],
+        }),
+      },
     );
   });
   afterEach(async () => {
@@ -223,6 +236,7 @@ describe('Durable seat messages', () => {
         },
       });
       value = await debate.prepare(runId, { expectedRevision: value.revision });
+      expect(value.phase).toBe('ready');
       expect(() => send('before-start')).toThrow('not open');
       value = await debate.start(runId, {
         expectedRevision: value.revision,
