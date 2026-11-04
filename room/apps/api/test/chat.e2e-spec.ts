@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MaestroService } from '../src/maestro/maestro.service.js';
@@ -19,7 +19,7 @@ describe('Local room API boundaries', () => {
   let controlRoot: string;
   beforeEach(async () => {
     controlRoot = mkdtempSync(join(tmpdir(), 'room-chat-http-'));
-    vi.stubEnv('ROOM_CONTROL_HOME', controlRoot);
+    vi.stubEnv('ROOM_CONTROL_HOME', join(controlRoot, 'private'));
     const runtime: AgentRuntime = {
       info: {
         id: 'b',
@@ -93,6 +93,27 @@ describe('Local room API boundaries', () => {
     await app.close();
     vi.unstubAllEnvs();
     rmSync(controlRoot, { recursive: true, force: true });
+  });
+  it('attaches and detaches a live folder using the local hangout project route', async () => {
+    const api = request(app.getHttpServer());
+    const route = '/api/runs/hangout/project';
+    await api.get(route).set('Host', host).expect(200, { path: null });
+    const project = join(realpathSync(controlRoot), 'project');
+    const privateSeat = join(
+      realpathSync(controlRoot),
+      'private',
+      'workbench',
+      'runs',
+      'synthetic',
+      'seat',
+    );
+    mkdirSync(privateSeat, { recursive: true });
+    await api.put(route).set('Host', host).send({ path: privateSeat }).expect(400);
+    mkdirSync(project);
+    await api.put(route).set('Host', host).send({ path: '/' }).expect(400);
+    await api.put(route).set('Host', host).send({ path: project }).expect(200, { path: project });
+    await api.get(route).set('Host', host).expect(200, { path: project });
+    await api.delete(route).set('Host', host).expect(200, { path: null });
   });
   it('opens the same Astra and Fable hangout without changing the selected debate', async () => {
     const api = request(app.getHttpServer());

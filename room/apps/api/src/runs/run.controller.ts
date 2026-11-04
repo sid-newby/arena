@@ -8,6 +8,7 @@ import {
   Inject,
   Param,
   Post,
+  Put,
   Query,
   Sse,
 } from '@nestjs/common';
@@ -26,6 +27,18 @@ export class RunController {
   @HttpCode(200)
   searchMemory(@Body() body: unknown) {
     return this.chat.searchHangoutMemory(body);
+  }
+  @Get('hangout/project')
+  project() {
+    return this.chat.hangoutProject();
+  }
+  @Put('hangout/project')
+  attachProject(@Body() body: unknown) {
+    return this.chat.setHangoutProject(body);
+  }
+  @Delete('hangout/project')
+  detachProject() {
+    return this.chat.detachHangoutProject();
   }
   @Get('hangout/presence')
   presence() {

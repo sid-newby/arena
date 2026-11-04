@@ -4,6 +4,7 @@ import { Tabs } from 'radix-ui';
 import { AgentPanel } from '@/components/agent-panel';
 import { Button } from '@/components/ui/button';
 import { HangoutMemory } from '@/components/hangout-memory';
+import { HangoutProject } from '@/components/hangout-project';
 import { ThemeControls } from '@/components/theme-controls';
 import { MaestroDialog } from '@/components/maestro-dialog';
 import { VoiceBand } from '@/components/voice-band';
@@ -272,6 +273,7 @@ export default function App() {
             Preview
             <span className="toggle-light" />
           </Button>
+          {!debate && <HangoutProject />}
           {!debate && <HangoutMemory />}
           <ThemeControls />
           <Button

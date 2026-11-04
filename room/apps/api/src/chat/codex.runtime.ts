@@ -27,6 +27,7 @@ export async function runCodex(
   role: ParticipantRole = 'a',
 ) {
   const client = new CodexClient();
+  const requiredVersion = context.requiredToolVersion ?? ROOM_TOOL_VERSION;
   const tools = context.tools ?? runtimeTools(role);
   const schemas = new Map(
     tools.map((definition) => [definition.name, toolInputSchema(definition)]),
@@ -40,7 +41,7 @@ export async function runCodex(
   const usage = new CodexUsageTracker(
     context,
     selection.model,
-    !context.session || (context.toolVersion ?? 0) < ROOM_TOOL_VERSION,
+    !context.session || (context.toolVersion ?? 0) < requiredVersion,
   );
   let providerDuration: unknown;
   let successful = false;
@@ -126,9 +127,7 @@ export async function runCodex(
             : { url: 'https://mcp.context7.com/mcp' },
       },
     };
-    const migrateSession = Boolean(
-      context.session && (context.toolVersion ?? 0) < ROOM_TOOL_VERSION,
-    );
+    const migrateSession = Boolean(context.session && (context.toolVersion ?? 0) < requiredVersion);
     const result =
       context.session && !migrateSession
         ? await client.request('thread/resume', { ...config, threadId: context.session })
@@ -172,7 +171,7 @@ export async function runCodex(
       if (items.length) await client.request('thread/inject_items', { threadId, items });
     }
     context.controller.signal.throwIfAborted();
-    context.saveSession(threadId, ROOM_TOOL_VERSION);
+    context.saveSession(threadId, requiredVersion);
     startingTurn = true;
     await client.request('turn/start', {
       threadId,

@@ -79,6 +79,7 @@ export interface TurnContext {
   mode?: 'side';
   session?: string;
   toolVersion?: number;
+  requiredToolVersion?: number;
   priorHistory?: HistoryTurn[];
   controller: AbortController;
   append: (text: string) => void;

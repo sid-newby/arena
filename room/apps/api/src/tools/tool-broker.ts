@@ -1,12 +1,18 @@
 import { resolve } from 'node:path';
-import { realpathSync } from 'node:fs';
+import { privateProjectRoots } from '../workspaces/workspace-paths.js';
+import { realpathSync, statSync } from 'node:fs';
 import {
   WorkspaceManager,
   containsPath,
   type WorkspaceSeat,
   type SeatWorkspace,
 } from '../workspaces/workspace-manager.js';
-import { CommandSandbox } from './command-sandbox.js';
+import {
+  CommandSandbox,
+  LIVE_PROTECTED_PART,
+  LIVE_PROTECTED_SUFFIX,
+  protectedProjectPath,
+} from './command-sandbox.js';
 
 export type ToolProfile = 'analysis' | 'build';
 export interface BrokerToolDefinition {
@@ -91,13 +97,17 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const data = JSON.parse(fs.readFileSync(0, 'utf8'));
 const root = fs.realpathSync(data.root);
-const protectedPart = value => value === '.git' || value === '.room' || value === '.ssh' || value === '.aws' || value === '.codex' || value.startsWith('.env') || value.startsWith('.tool-');
+const livePart = new RegExp('^(?:' + data.protectedPart + ')$', 'i');
+const liveSuffix = new RegExp(data.protectedSuffix + '$', 'i');
+const privatePath = value => data.live && data.privateRoots.some(p => value.toLowerCase() === p.toLowerCase() || value.toLowerCase().startsWith(p.toLowerCase() + path.sep));
+const protectedPart = value => (data.live && (livePart.test(value) || liveSuffix.test(value))) || value === '.git' || value === '.room' || value === '.ssh' || value === '.aws' || value === '.codex' || value.startsWith('.env') || value.startsWith('.tool-');
 function target(value, writing = false) {
   if (typeof value !== 'string' || value.includes('\0') || path.isAbsolute(value) || value.split(/[\\/]/).some(v => v === '..' || protectedPart(v))) throw Error('Path is outside the permitted workspace.');
   const parts = value.split('/').filter(v => v && v !== '.');
   let current = root;
   for (let i = 0; i < parts.length; i++) {
     current = path.join(current, parts[i]);
+    if (privatePath(current)) throw Error('Protected project directory.');
     try {
       const entry = fs.lstatSync(current);
       if (entry.isSymbolicLink()) throw Error('Symlink paths are unavailable.');
@@ -113,7 +123,7 @@ function read(file, maximum) {
   const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
     const info = fs.fstatSync(fd);
-    if (!info.isFile() || info.size > maximum) throw Error('File is not a regular file or exceeds the size limit.');
+    if (!info.isFile() || (data.live && info.nlink !== 1) || info.size > maximum) throw Error('File is not a regular file or exceeds the size limit.');
     const content = Buffer.allocUnsafe(maximum + 1);
     let bytes = 0;
     while (bytes < content.length) {
@@ -125,19 +135,19 @@ function read(file, maximum) {
     return content.subarray(0, bytes);
   } finally { fs.closeSync(fd); }
 }
-function write(file, text) {
+function write(file, text, mode, createOnly) {
   const temporary = path.join(path.dirname(file), '.tool-write-' + crypto.randomUUID());
   try {
     const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
-    try { fs.writeFileSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-    fs.renameSync(temporary, file);
+    try { fs.writeFileSync(fd, text); if (mode !== undefined) fs.fchmodSync(fd, mode); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    if (createOnly) fs.linkSync(temporary, file); else fs.renameSync(temporary, file);
   } finally { try { fs.unlinkSync(temporary); } catch {} }
 }
 try {
   const file = target(data.path || '', data.action === 'write_file');
   let result;
   if (data.action === 'list_workspace') {
-    result = { entries: fs.readdirSync(file, { withFileTypes: true }).filter(e => !e.isSymbolicLink() && !protectedPart(e.name)).slice(0, 200).map(e => ({ name: e.name, directory: e.isDirectory() })) };
+    result = { entries: fs.readdirSync(file, { withFileTypes: true }).filter(e => !e.isSymbolicLink() && !protectedPart(e.name) && !privatePath(path.join(file,e.name))).slice(0, 200).map(e => ({ name: e.name, directory: e.isDirectory() })) };
   } else if (data.action === 'read_file') {
     const content = read(file, 256 * 1024);
     if (content.includes(0)) throw Error('Use artifact publication for binary files.');
@@ -149,6 +159,7 @@ try {
         if (files >= 200 || matches.length >= 100) return;
         if (entry.isSymbolicLink() || protectedPart(entry.name) || entry.name === 'node_modules') continue;
         const absolute = path.join(directory, entry.name);
+        if (privatePath(absolute)) continue;
         if (entry.isDirectory()) walk(absolute);
         else if (entry.isFile()) {
           files++;
@@ -163,9 +174,14 @@ try {
     walk(file); result = { matches, filesInspected: files, bounded: files >= 200 || matches.length >= 100 };
   } else if (data.action === 'write_file' || data.action === 'patch_file') {
     let text = data.text;
+    const exists = fs.existsSync(file);
+    if (data.live && exists && !data.expectedSha256) throw Error('Provide expectedSha256 from project_read to edit an existing file.');
+    const mode = data.live && exists ? fs.lstatSync(file).mode & 0o777 : undefined;
     if (data.action === 'patch_file' || data.expectedSha256) {
-      const previous = read(file, 256 * 1024).toString('utf8');
-      if (data.expectedSha256 && crypto.createHash('sha256').update(previous).digest('hex') !== data.expectedSha256) throw Error('The file changed since it was read.');
+      const bytes = read(file, 256 * 1024);
+      if (data.live && (bytes.includes(0) || !bytes.equals(Buffer.from(bytes.toString('utf8'))))) throw Error('Only UTF-8 text files can be edited.');
+      const previous = bytes.toString('utf8');
+      if (data.expectedSha256 && crypto.createHash('sha256').update(bytes).digest('hex') !== data.expectedSha256) throw Error('The file changed since it was read.');
       if (data.action === 'patch_file') {
         const index = previous.indexOf(data.find);
         if (index < 0 || previous.indexOf(data.find, index + data.find.length) >= 0) throw Error('Patch context must occur exactly once.');
@@ -173,7 +189,7 @@ try {
       }
     }
     if (Buffer.byteLength(text) > 256 * 1024) throw Error('File text exceeds 256 KiB.');
-    write(file, text); result = { path: data.path, bytes: Buffer.byteLength(text), sha256: crypto.createHash('sha256').update(text).digest('hex') };
+    write(file, text, mode, data.live && !data.expectedSha256); result = { path: data.path, bytes: Buffer.byteLength(text), sha256: crypto.createHash('sha256').update(text).digest('hex') };
   } else if (data.action === 'publish_artifact') {
     const content = read(file, 10 * 1024 * 1024); result = { content: content.toString('base64') };
   } else throw Error('Unknown workspace operation.');
@@ -208,12 +224,129 @@ function relativePath(value: string): string {
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
-export class ToolBroker {
+class WorkspaceTools {
+  constructor(protected readonly sandbox = new CommandSandbox()) {}
+  protected async file(
+    workspace: SeatWorkspace,
+    name: string,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+    live = false,
+  ) {
+    const payload: Record<string, unknown> = {
+      root: workspace.root,
+      live,
+      privateRoots: live ? privateProjectRoots() : [],
+      protectedPart: LIVE_PROTECTED_PART,
+      protectedSuffix: LIVE_PROTECTED_SUFFIX,
+      action: name,
+      path: input.path === undefined ? '.' : relativePath(text(input, 'path')),
+    };
+    if (
+      ['read_file', 'write_file', 'patch_file', 'publish_artifact'].includes(name) &&
+      input.path === undefined
+    )
+      throw new Error('Provide a file path.');
+    if (name === 'search_files') {
+      payload.query = text(input, 'query', 1000);
+      if (!payload.query) throw new Error('Provide a non-empty search query.');
+    }
+    if (name === 'write_file') {
+      payload.text = text(input, 'text', 256 * 1024);
+    }
+    if (name === 'write_file' || (live && name === 'patch_file')) {
+      if (input.expectedSha256 !== undefined || (live && name === 'patch_file')) {
+        const hash = text(input, 'expectedSha256');
+        if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Provide a valid expectedSha256.');
+        payload.expectedSha256 = hash;
+      }
+    }
+    if (name === 'patch_file') {
+      payload.find = text(input, 'find', 256 * 1024);
+      payload.replace = text(input, 'replace', 256 * 1024);
+      if (!payload.find) throw new Error('Patch context cannot be empty.');
+    }
+    const result = await this.sandbox.run({
+      workspace,
+      live: live ? 'files' : undefined,
+      argv: [process.execPath, '--input-type=commonjs', '-e', FILE_WORKER],
+      cwd: workspace.root,
+      stdin: JSON.stringify(payload),
+      signal: signal,
+      timeoutMs: 10_000,
+      maxOutputBytes: name === 'publish_artifact' ? 15 * 1024 * 1024 : 2 * 1024 * 1024,
+    });
+    if (result.cancelled) throw new Error('Tool operation cancelled.');
+    if (result.timedOut || result.truncated || result.signal)
+      throw new Error('Workspace operation exceeded its execution limit.');
+    let response: unknown;
+    try {
+      response = JSON.parse(result.stdout);
+    } catch {
+      throw new Error(`Workspace operation failed. ${result.stderr.slice(0, 500)}`);
+    }
+    if (!object(response) || response.ok !== true || !object(response.result))
+      throw new Error(
+        object(response) && typeof response.error === 'string'
+          ? response.error
+          : 'Workspace operation failed.',
+      );
+    return response.result;
+  }
+  protected async command(
+    workspace: SeatWorkspace,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+    live = false,
+  ): Promise<string> {
+    if (
+      !Array.isArray(input.argv) ||
+      input.argv.length < 1 ||
+      input.argv.length > 64 ||
+      !input.argv.every(
+        (arg) => typeof arg === 'string' && arg.length <= 16000 && !arg.includes('\0'),
+      )
+    )
+      throw new Error('Provide argv as 1 to 64 command arguments.');
+    const argv: string[] = input.argv;
+    if (argv.reduce((bytes, argument) => bytes + Buffer.byteLength(argument) + 1, 0) > 64 * 1024)
+      throw new Error('Command arguments exceed the 64 KiB limit.');
+    const cwd =
+      input.cwd === undefined
+        ? workspace.root
+        : resolve(workspace.root, relativePath(text(input, 'cwd')));
+    if (!containsPath(workspace.root, realpathSync(cwd)))
+      throw new Error('Command directory is outside the workspace.');
+    const timeoutMs = input.timeoutMs ?? 30_000;
+    if (
+      typeof timeoutMs !== 'number' ||
+      !Number.isSafeInteger(timeoutMs) ||
+      timeoutMs < 1 ||
+      timeoutMs > 120_000
+    )
+      throw new Error('Command timeout must be between 1 and 120000 milliseconds.');
+    return JSON.stringify(
+      await this.sandbox.run({
+        workspace,
+        argv,
+        cwd,
+        timeoutMs,
+        signal,
+        live: live ? 'command' : undefined,
+        includeDependencies: input.includeDependencies !== false,
+      }),
+    );
+  }
+}
+
+export class ToolBroker extends WorkspaceTools {
   private readonly pending = new Map<string, Promise<void>>();
   constructor(
     private readonly manager: WorkspaceManager,
-    private readonly sandbox = new CommandSandbox(),
-  ) {}
+    sandbox = new CommandSandbox(),
+  ) {
+    super(sandbox);
+  }
   definitions(profile: ToolProfile = 'analysis'): BrokerToolDefinition[] {
     return structuredClone(
       definitions.filter(
@@ -282,59 +415,9 @@ export class ToolBroker {
         }),
       );
     }
-    const payload: Record<string, unknown> = {
-      root: workspace.root,
-      action: request.name,
-      path: request.input.path === undefined ? '.' : relativePath(text(request.input, 'path')),
-    };
-    if (
-      ['read_file', 'write_file', 'patch_file', 'publish_artifact'].includes(request.name) &&
-      request.input.path === undefined
-    )
-      throw new Error('Provide a file path.');
-    if (request.name === 'search_files') {
-      payload.query = text(request.input, 'query', 1000);
-      if (!payload.query) throw new Error('Provide a non-empty search query.');
-    }
-    if (request.name === 'write_file') {
-      payload.text = text(request.input, 'text', 256 * 1024);
-      if (request.input.expectedSha256 !== undefined) {
-        const hash = text(request.input, 'expectedSha256');
-        if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('Provide a valid expectedSha256.');
-        payload.expectedSha256 = hash;
-      }
-    }
-    if (request.name === 'patch_file') {
-      payload.find = text(request.input, 'find', 256 * 1024);
-      payload.replace = text(request.input, 'replace', 256 * 1024);
-      if (!payload.find) throw new Error('Patch context cannot be empty.');
-    }
-    const result = await this.sandbox.run({
-      workspace,
-      argv: [process.execPath, '--input-type=commonjs', '-e', FILE_WORKER],
-      cwd: workspace.root,
-      stdin: JSON.stringify(payload),
-      signal: request.signal,
-      timeoutMs: 10_000,
-      maxOutputBytes: request.name === 'publish_artifact' ? 15 * 1024 * 1024 : 2 * 1024 * 1024,
-    });
-    if (result.cancelled) throw new Error('Tool operation cancelled.');
-    if (result.timedOut || result.truncated || result.signal)
-      throw new Error('Workspace operation exceeded its execution limit.');
-    let response: unknown;
-    try {
-      response = JSON.parse(result.stdout);
-    } catch {
-      throw new Error(`Workspace operation failed. ${result.stderr.slice(0, 500)}`);
-    }
-    if (!object(response) || response.ok !== true || !object(response.result))
-      throw new Error(
-        object(response) && typeof response.error === 'string'
-          ? response.error
-          : 'Workspace operation failed.',
-      );
+    const result = await this.file(workspace, request.name, request.input, request.signal);
     if (request.name === 'publish_artifact') {
-      if (typeof response.result.content !== 'string')
+      if (typeof result.content !== 'string')
         throw new Error('Artifact content could not be read.');
       const path = text(request.input, 'path');
       const title =
@@ -345,43 +428,112 @@ export class ToolBroker {
           turnId: request.turnId,
           path,
           title,
-          content: Buffer.from(response.result.content, 'base64'),
+          content: Buffer.from(result.content, 'base64'),
         }),
       );
     }
-    return JSON.stringify(response.result);
+    return JSON.stringify(result);
   }
-  private async command(
-    workspace: SeatWorkspace,
+}
+
+const liveNames: Record<string, string> = {
+  project_list: 'list_workspace',
+  project_read: 'read_file',
+  project_search: 'search_files',
+  project_write: 'write_file',
+  project_patch: 'patch_file',
+  project_run: 'run_command',
+};
+const liveDescriptions: Record<string, string> = {
+  project_list: 'List entries in the shared project directory.',
+  project_read: 'Read a UTF-8 project file (up to 256 KiB), including its sha256 for edits.',
+  project_search: 'Search the project for literal text. Results are bounded.',
+  project_write:
+    'Create a new UTF-8 file, or replace an existing file using its most recent expectedSha256 from project_read.',
+  project_patch:
+    'Replace one exact unique occurrence in a UTF-8 file. Provide expectedSha256 from project_read.',
+  project_run:
+    'Run argv on a disposable project copy with temp/cache output. No source changes are retained. Protected paths, hardlinks and network are unavailable.',
+};
+export class LiveProjectTools extends WorkspaceTools {
+  private readonly pending = new Map<string, Promise<void>>();
+  definitions(): BrokerToolDefinition[] {
+    return Object.entries(liveNames).map(([name, source]) => {
+      const entry = structuredClone(definitions.find((definition) => definition.name === source)!);
+      if (name === 'project_run')
+        entry.inputSchema = schema(
+          {
+            ...(entry.inputSchema.properties as Record<string, unknown>),
+            includeDependencies: {
+              type: 'boolean',
+              description:
+                'Include installed node_modules (default true). Use false for faster checks that only need the runtime.',
+            },
+          },
+          ['argv'],
+        );
+      if (name === 'project_patch')
+        entry.inputSchema = schema(
+          {
+            ...(entry.inputSchema.properties as Record<string, unknown>),
+            expectedSha256: { type: 'string' },
+          },
+          ['path', 'find', 'replace', 'expectedSha256'],
+        );
+      return { ...entry, name, description: liveDescriptions[name]! };
+    });
+  }
+  async call(
+    root: string,
+    name: string,
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<string> {
+    signal?.throwIfAborted();
+    const definition = this.definitions().find((def) => def.name === name);
+    if (!definition) throw new Error('Unknown project tool.');
+    const fields = definition.inputSchema.properties;
+    if (!object(fields) || Object.keys(input).some((key) => !Object.hasOwn(fields, key)))
+      throw new Error('Tool input contains unsupported fields.');
+    if (typeof input.cwd === 'string' && protectedProjectPath(input.cwd))
+      throw new Error('Protected project directory.');
+    const canonical = realpathSync(root);
+    if (canonical !== root) throw new Error('The attached project path changed.');
+    const identity = statSync(root);
     if (
-      !Array.isArray(input.argv) ||
-      input.argv.length < 1 ||
-      input.argv.length > 64 ||
-      !input.argv.every(
-        (arg) => typeof arg === 'string' && arg.length <= 16000 && !arg.includes('\0'),
-      )
+      privateProjectRoots().some((path) => containsPath(path, root)) ||
+      protectedProjectPath(root)
     )
-      throw new Error('Provide argv as 1 to 64 command arguments.');
-    const argv: string[] = input.argv;
-    if (argv.reduce((bytes, argument) => bytes + Buffer.byteLength(argument) + 1, 0) > 64 * 1024)
-      throw new Error('Command arguments exceed the 64 KiB limit.');
-    const cwd =
-      input.cwd === undefined
-        ? workspace.root
-        : resolve(workspace.root, relativePath(text(input, 'cwd')));
-    if (!containsPath(workspace.root, realpathSync(cwd)))
-      throw new Error('Command directory is outside the workspace.');
-    const timeoutMs = input.timeoutMs ?? 30_000;
-    if (
-      typeof timeoutMs !== 'number' ||
-      !Number.isSafeInteger(timeoutMs) ||
-      timeoutMs < 1 ||
-      timeoutMs > 120_000
-    )
-      throw new Error('Command timeout must be between 1 and 120000 milliseconds.');
-    return JSON.stringify(await this.sandbox.run({ workspace, argv, cwd, timeoutMs, signal }));
+      throw new Error('Protected project directory.');
+    if (input.includeDependencies !== undefined && typeof input.includeDependencies !== 'boolean')
+      throw new Error('includeDependencies must be boolean.');
+    const workspace: SeatWorkspace = {
+      runId: '',
+      seat: 'a',
+      source: null,
+      root: canonical,
+      readOnlyRoots: [],
+    };
+    const operation = liveNames[name]!;
+    if (name === 'project_run') return this.command(workspace, input, signal, true);
+    const execute = async () => {
+      signal?.throwIfAborted();
+      const now = statSync(root);
+      if (realpathSync(root) !== canonical || now.dev !== identity.dev || now.ino !== identity.ino)
+        throw new Error('The attached project path changed.');
+      return JSON.stringify(await this.file(workspace, operation, input, signal, true));
+    };
+    if (name !== 'project_write' && name !== 'project_patch') return execute();
+    const result = (this.pending.get(canonical) ?? Promise.resolve()).then(execute);
+    const tail = result.then(
+      () => {},
+      () => {},
+    );
+    this.pending.set(canonical, tail);
+    try {
+      return await result;
+    } finally {
+      if (this.pending.get(canonical) === tail) this.pending.delete(canonical);
+    }
   }
 }

@@ -1,3 +1,4 @@
+import type { HangoutProjectBinding } from '../workspaces/hangout-project.js';
 import { modelName } from '../runs/participant-name.js';
 import { PeerWhispers } from './peer-whispers.js';
 import { HANGOUT_ID } from '../memory/room-memory.js';
@@ -132,6 +133,7 @@ export class ChatStore {
         (id, kind, payload) => this.runs.append(id, kind, null, null, payload),
       );
       this.db.exec(`
+      CREATE TABLE IF NOT EXISTS hangout_project (id INTEGER PRIMARY KEY CHECK(id=1), path TEXT NOT NULL, device TEXT NOT NULL, inode TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS agents(run_id TEXT NOT NULL,id TEXT NOT NULL,pose TEXT NOT NULL DEFAULT 'front',pose_revision INTEGER NOT NULL DEFAULT 0,error TEXT,notice TEXT,PRIMARY KEY(run_id,id));
       CREATE TABLE IF NOT EXISTS turns(id TEXT PRIMARY KEY,agent TEXT NOT NULL,request TEXT NOT NULL,prompt TEXT NOT NULL,text TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,addressed_to TEXT,from_panelist TEXT,conversation_id TEXT NOT NULL,peer_depth INTEGER NOT NULL DEFAULT 0,run_id TEXT NOT NULL,binding_id TEXT NOT NULL,config_revision INTEGER NOT NULL,original_author TEXT,stream_revision INTEGER NOT NULL DEFAULT 0,UNIQUE(run_id,agent,request));
       CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,stopped INTEGER NOT NULL DEFAULT 0);
@@ -294,6 +296,19 @@ export class ChatStore {
       }
       this.db.prepare('INSERT INTO schema_migrations VALUES (2,?)').run(Date.now());
     });
+  }
+  hangoutProject(): HangoutProjectBinding | null {
+    const row = this.db.prepare('SELECT path,device,inode FROM hangout_project WHERE id=1').get();
+    return row
+      ? { path: String(row.path), device: String(row.device), inode: String(row.inode) }
+      : null;
+  }
+  setHangoutProject(project: HangoutProjectBinding | null) {
+    if (project)
+      this.db
+        .prepare('INSERT OR REPLACE INTO hangout_project(id,path,device,inode) VALUES (1,?,?,?)')
+        .run(project.path, project.device, project.inode);
+    else this.db.prepare('DELETE FROM hangout_project WHERE id=1').run();
   }
   createPeerWhispers(factory: (binding: ParticipantBinding) => AgentRuntime, workspace: string) {
     const memory = this.runs.memory;

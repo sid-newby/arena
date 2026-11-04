@@ -1,4 +1,4 @@
-import { ROOM_TOOL_VERSION } from '../../../src/chat/panel-presence.js';
+import { ROOM_TOOL_VERSION, HANGOUT_TOOL_VERSION } from '../../../src/chat/panel-presence.js';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -195,6 +195,36 @@ describe('Codex room tool sessions', () => {
     },
   );
 
+  it('migrates an existing public hangout once for shared project tools and resumes the upgraded session', async () => {
+    const calls = protocol();
+    const tools = [
+      {
+        name: 'project_read',
+        description: 'Read project file',
+        inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+      },
+    ];
+    const turn = context({
+      session: 'old-session',
+      toolVersion: ROOM_TOOL_VERSION,
+      requiredToolVersion: HANGOUT_TOOL_VERSION,
+      tools,
+    });
+    await runCodex(turn, workspace);
+    expect(calls.find((call) => call.method === 'thread/start')?.params).toMatchObject({
+      dynamicTools: [expect.objectContaining({ name: 'project_read' })],
+    });
+    expect(turn.saveSession).toHaveBeenCalledWith('new-session', HANGOUT_TOOL_VERSION);
+    const resumed = protocol();
+    await runCodex(
+      { ...turn, session: 'new-session', toolVersion: HANGOUT_TOOL_VERSION },
+      workspace,
+    );
+    expect(resumed.filter((call) => call.method === 'thread/start')).toHaveLength(0);
+    expect(resumed.find((call) => call.method === 'thread/resume')?.params).toMatchObject({
+      threadId: 'new-session',
+    });
+  });
   it('resumes current tool sessions without replaying room history', async () => {
     const calls = protocol();
     await runCodex(context({ session: 'old-session', toolVersion: 7 }), workspace);

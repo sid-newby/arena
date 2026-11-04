@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { AgentId, Pose } from './chat.types.js';
 
 export const ROOM_TOOL_VERSION = 7;
+export const HANGOUT_TOOL_VERSION = 8;
 export const PANEL_TARGETS = ['audience', 'peer', 'center'] as const;
 export type PanelTarget = (typeof PANEL_TARGETS)[number];
 

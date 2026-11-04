@@ -1,3 +1,5 @@
+import { LiveProjectTools } from '../tools/tool-broker.js';
+import { bindHangoutProject, verifyHangoutProject } from '../workspaces/hangout-project.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { HonchoClient } from '../memory/honcho-client.js';
@@ -36,7 +38,13 @@ import {
   type ProviderId,
 } from '../runs/run.contract.js';
 import { whisperPeerTool, type PeerWhispers } from './peer-whispers.js';
-import { PANEL_TARGETS, ROOM_TOOL_VERSION, panelPose, type PanelTarget } from './panel-presence.js';
+import {
+  PANEL_TARGETS,
+  ROOM_TOOL_VERSION,
+  HANGOUT_TOOL_VERSION,
+  panelPose,
+  type PanelTarget,
+} from './panel-presence.js';
 import { PANELISTS } from './panelist-delivery.js';
 import { hangoutInstructions, hangoutParticipationTools, runtimeTools } from './runtime-tools.js';
 import type {
@@ -66,6 +74,8 @@ export class ChatService implements OnModuleDestroy {
   private unsubscribeCommits?: () => void;
   private sideService?: SideConversationService;
   private peerWhispers?: PeerWhispers;
+  private readonly projectTools = new LiveProjectTools();
+  private projectCalls = 0;
   private destroyed = false;
   private readonly stopEpochs = new Map<string, number>();
   private readonly seatStopEpochs = new Map<string, number>();
@@ -123,6 +133,8 @@ export class ChatService implements OnModuleDestroy {
       listeners: new Map(),
       expressionRuns: new Map(),
       runtimeCache: new Map(),
+      projectTools: new LiveProjectTools(),
+      projectCalls: 0,
       runtimeFactory:
         options.runtimeFactory ??
         ((binding: ParticipantBinding) => runtimes[binding.role === 'b' ? 'b' : 'a']),
@@ -244,6 +256,26 @@ export class ChatService implements OnModuleDestroy {
   }
   hangout() {
     return this.store.runs.ensureHangout();
+  }
+  hangoutProject() {
+    return { path: this.store.hangoutProject()?.path ?? null };
+  }
+  setHangoutProject(body: unknown) {
+    if (!body || typeof body !== 'object' || !('path' in body) || Object.keys(body).length !== 1)
+      throw new BadRequestException('Provide the absolute project path.');
+    return this.changeHangoutProject(bindHangoutProject(body.path));
+  }
+  detachHangoutProject() {
+    return this.changeHangoutProject(null);
+  }
+  private changeHangoutProject(project: ReturnType<typeof bindHangoutProject> | null) {
+    this.hangout();
+    if (this.busy(HANGOUT_ID) || this.store.side.busy(HANGOUT_ID) || this.projectCalls)
+      throw new ConflictException(
+        'Wait for active and queued conversations to finish before changing the project.',
+      );
+    this.store.setHangoutProject(project);
+    return this.hangoutProject();
   }
   hangoutPresence() {
     this.hangout();
@@ -826,6 +858,10 @@ export class ChatService implements OnModuleDestroy {
     );
     const additions = policy?.definitions(binding);
     const hangout = turn.run_id === HANGOUT_ID;
+    const requiredToolVersion = hangout ? HANGOUT_TOOL_VERSION : ROOM_TOOL_VERSION;
+    const project = hangout ? this.store.hangoutProject() : null;
+    const projectDefinitions = hangout ? this.projectTools.definitions() : [];
+    let handledProject = false;
     let handledWhisper = false;
     const definitions =
       additions || hangout
@@ -834,7 +870,14 @@ export class ChatService implements OnModuleDestroy {
               [
                 ...runtimeTools(binding.role),
                 ...(additions ?? []),
-                ...(hangout ? [...hangoutParticipationTools, recallTool, whisperPeerTool] : []),
+                ...(hangout
+                  ? [
+                      ...hangoutParticipationTools,
+                      recallTool,
+                      whisperPeerTool,
+                      ...projectDefinitions,
+                    ]
+                  : []),
               ].map((tool) => [tool.name, tool]),
             ).values(),
           ]
@@ -857,15 +900,17 @@ export class ChatService implements OnModuleDestroy {
                   this.store.runs.binding(turn.run_id, agent === 'a' ? 'b' : 'a').config.model,
                 ),
                 Boolean(this.store.runs.memory),
+                project?.path ?? null,
               )
             : undefined,
           refreshInstructions: hangout,
           session: savedSession,
           toolVersion: savedToolVersion,
+          requiredToolVersion,
           priorHistory:
             binding.config.provider === 'codex' &&
             savedSession &&
-            savedToolVersion < ROOM_TOOL_VERSION
+            savedToolVersion < requiredToolVersion
               ? store.history(agent)
               : undefined,
           controller,
@@ -896,6 +941,21 @@ export class ChatService implements OnModuleDestroy {
             controller.signal.throwIfAborted();
             if (name === whisperPeerTool.name) handledWhisper = true;
             if (hangout) this.requirePresent(binding);
+            if (name.startsWith('project_')) {
+              if (
+                this.active.get(key)?.turn.id !== id ||
+                !projectDefinitions.some((tool) => tool.name === name)
+              )
+                throw new Error('This project tool is unavailable.');
+              handledProject = true;
+              const root = verifyHangoutProject(project);
+              this.projectCalls++;
+              try {
+                return await this.projectTools.call(root, name, input, controller.signal);
+              } finally {
+                this.projectCalls--;
+              }
+            }
             // Private arguments, results and failures must bypass shared tool telemetry.
             if (name === whisperPeerTool.name) {
               if (
@@ -1036,9 +1096,11 @@ export class ChatService implements OnModuleDestroy {
           // Provider diagnostics can echo a private tool payload.
           const message = handledWhisper
             ? 'The agent connection failed during a private exchange.'
-            : error instanceof Error
-              ? error.message
-              : 'The agent connection failed.';
+            : handledProject
+              ? 'The agent connection failed during project work.'
+              : error instanceof Error
+                ? error.message
+                : 'The agent connection failed.';
           store.finish(id, 'failed', performance.now() - started);
           store.setError(agent, message);
           if (/auth|unauthorized|api.key|login|401|403|model.*(not|unavailable)/i.test(message)) {
