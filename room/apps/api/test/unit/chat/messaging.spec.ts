@@ -504,7 +504,9 @@ describe('Durable seat messages', () => {
     });
     await settle();
     expect(runs[2].context.session).toBeUndefined();
-    expect(runs[2].context.instructions).toContain('Earlier side question');
+    expect(runs[2].context.instructions).not.toContain('Earlier side question');
+    expect(runs[2].context.text).toContain('Earlier side question');
+    expect(runs[2].context.text).not.toContain('Unconfirmed side work');
     expect(runs[2].context.instructions).not.toContain('Unconfirmed side work');
   });
   it('isolates side sessions, text and tools while main work continues', async () => {
