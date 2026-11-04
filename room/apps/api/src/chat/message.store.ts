@@ -129,6 +129,15 @@ export class SeatMessageStore {
       });
     });
   }
+  hasScheduledDelivery(runId: string) {
+    return Boolean(
+      this.db
+        .prepare(
+          "SELECT 1 FROM human_messages WHERE run_id=? AND status IN ('queued','dispatching','running') LIMIT 1",
+        )
+        .get(runId),
+    );
+  }
   pending(runId: string, seat?: SeatId) {
     const sql =
       "SELECT COUNT(*) AS n FROM human_messages WHERE run_id=? AND status IN ('queued','dispatching','running','uncertain')";

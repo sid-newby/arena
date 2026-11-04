@@ -178,7 +178,9 @@ async function projectSnapshot(
 // package-manager version available independently of the user's shell shims.
 function installedPnpmBin() {
   const executable = process.env.npm_execpath;
-  return executable?.endsWith('/pnpm/bin/pnpm.native') && existsSync(executable)
+  return executable &&
+    /\/(?:pnpm\/bin\/pnpm\.native|@pnpm\/exe\.darwin-(?:arm64|x64)\/pnpm)$/.test(executable) &&
+    existsSync(executable)
     ? dirname(realpathSync(executable))
     : undefined;
 }
@@ -211,6 +213,7 @@ function liveProfile(root: string, scratch: string, files: boolean, pnpmBin?: st
     '/dev/random',
     '/dev/fd',
     '/private/etc/localtime',
+    '/private/var/select/sh',
     '/opt/homebrew/bin/node',
     '/opt/homebrew/bin/task',
     '/opt/homebrew/bin/pnpm',

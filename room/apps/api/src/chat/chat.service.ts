@@ -270,7 +270,12 @@ export class ChatService implements OnModuleDestroy {
   }
   private changeHangoutProject(project: ReturnType<typeof bindHangoutProject> | null) {
     this.hangout();
-    if (this.busy(HANGOUT_ID) || this.store.side.busy(HANGOUT_ID) || this.projectCalls)
+    if (
+      this.executing(HANGOUT_ID) ||
+      this.store.messaging.hasScheduledDelivery(HANGOUT_ID) ||
+      this.store.side.busy(HANGOUT_ID) ||
+      this.projectCalls
+    )
       throw new ConflictException(
         'Wait for active and queued conversations to finish before changing the project.',
       );

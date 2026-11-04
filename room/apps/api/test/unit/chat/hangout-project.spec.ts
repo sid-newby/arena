@@ -19,6 +19,7 @@ import { LiveProjectTools } from '../../../src/tools/tool-broker.js';
 describe('hangout shared project', () => {
   let dir: string, project: string, chat: ChatService;
   let contexts: TurnContext[];
+  let store: ChatStore;
   let release: () => void;
   const broker = vi.spyOn(LiveProjectTools.prototype, 'call');
   const factory = (binding: ParticipantBinding): AgentRuntime => ({
@@ -42,7 +43,7 @@ describe('hangout shared project', () => {
     },
   });
   function open() {
-    const store = new ChatStore(join(dir, 'room.sqlite'), dir);
+    store = new ChatStore(join(dir, 'room.sqlite'), dir);
     const hangout = store.runs.ensureHangout();
     return ChatService.forTest(
       store,
@@ -134,6 +135,22 @@ describe('hangout shared project', () => {
     expect(contexts.at(-1)?.tools?.some((tool) => tool.name.startsWith('project_'))).toBe(false);
     expect(contexts.at(-1)?.instructions).not.toContain(project);
     expect(chat.detachHangoutProject()).toEqual({ path: null });
+  });
+  it('allows a folder change when an interrupted delivery only awaits review', () => {
+    const run = chat.hangout();
+    const message = store.messaging.create({
+      runId: run.id,
+      revision: run.revision,
+      seat: 'b',
+      bindingId: store.runs.binding(run.id, 'b').id,
+      intent: 'queue',
+      requestId: 'uncertain-delivery',
+      text: 'Message sent before restart',
+    });
+    expect(() => chat.setHangoutProject({ path: project })).toThrow(/finish before changing/);
+    store.messaging.update(message, 'uncertain');
+    expect(chat.setHangoutProject({ path: project })).toEqual({ path: project });
+    expect(store.messaging.get(message.id, run.id, 'b').status).toBe('uncertain');
   });
   it('keeps runtime state out of attachments while allowing the workspace source module', async () => {
     const room = join(dir, 'arena', 'room');
