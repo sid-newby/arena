@@ -1,0 +1,161 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@source "../node_modules/streamdown/dist/*.js";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+}
+
+:root {
+  --radius: 0.625rem;
+
+  /* Restrained neutrals. Craft comes from type and spacing, not color. */
+  --background: oklch(0.994 0 0);
+  --foreground: oklch(0.205 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.973 0 0);
+  --muted-foreground: oklch(0.553 0 0);
+  --accent: oklch(0.968 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.585 0.2 27.3);
+  --border: oklch(0.917 0 0);
+  --input: oklch(0.917 0 0);
+  --ring: oklch(0.708 0 0);
+
+  /* Muted, functional data colors — used only when a chart names a tone. */
+  --chart-1: oklch(0.5 0.13 277);
+  --chart-2: oklch(0.6 0.12 162);
+  --chart-3: oklch(0.7 0.12 70);
+  --chart-4: oklch(0.58 0.12 248);
+}
+
+.dark {
+  --background: oklch(0.165 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.265 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.265 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.27 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.2);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.62 0.13 277);
+  --chart-2: oklch(0.68 0.12 162);
+  --chart-3: oklch(0.76 0.12 70);
+  --chart-4: oklch(0.66 0.12 248);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Map Tailwind's font tokens to Geist. next/font sets --font-geist-* on
+   <body>, so this must live on body (not :root, where those vars are
+   undefined) for `font-sans`/`font-mono` to resolve to Geist / Geist Mono. */
+body {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+button {
+  cursor: pointer;
+}
+
+/* One restrained elevation step — a hairline, not a drop shadow. */
+.shadow-subtle {
+  box-shadow:
+    0 1px 1px oklch(0 0 0 / 0.04),
+    0 2px 6px -2px oklch(0 0 0 / 0.06);
+}
+
+/* Inline code in agent markdown gets a shaded pill. `:not(pre) > code` targets
+   only inline code, leaving fenced code blocks (Shiki) untouched. The tint is
+   derived from the muted-foreground so it reads in both light and dark mode. */
+.markdown :not(pre) > code {
+  border-radius: 0.375rem;
+  background-color: color-mix(in oklab, var(--muted-foreground) 16%, transparent);
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+  font-family: var(--font-mono);
+}
+
+/* A bright band sweeps across dim text. `inline-block` is essential: it sizes
+   the gradient to the text itself, so the band actually passes over the words
+   (on a full-width block the band rarely reaches the short label). */
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+.animate-shimmer {
+  display: inline-block;
+  color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 40%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 60%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer {
+    animation: none;
+    color: var(--muted-foreground);
+    -webkit-text-fill-color: var(--muted-foreground);
+  }
+}

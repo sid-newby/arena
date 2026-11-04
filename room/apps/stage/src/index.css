@@ -1,0 +1,135 @@
+@import 'tailwindcss';
+@source '../node_modules/@json-render/shadcn';
+
+:root {
+  --background: oklch(0.13 0.01 260);
+  --foreground: oklch(0.96 0.005 260);
+  --muted-foreground: oklch(0.65 0.01 260);
+  --primary: oklch(0.78 0.16 55);
+  --border: oklch(0.25 0.01 260);
+  font-family: 'Geist Variable', system-ui, sans-serif;
+  color-scheme: dark;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+}
+.research {
+  height: 100svh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.research-header {
+  height: 60px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--border);
+}
+.wordmark {
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-weight: 700;
+  margin: 0;
+}
+.wordmark span {
+  color: var(--primary);
+}
+.room-nav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.room-nav a {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1;
+  padding: 8px 0 6px;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.room-nav a:hover,
+.room-nav a[aria-current='page'] {
+  color: var(--foreground);
+}
+.room-nav a[aria-current='page'] {
+  border-bottom-color: var(--primary);
+}
+.research-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+.research-panel {
+  border-left: 1px solid var(--border);
+  padding: 16px;
+  overflow: auto;
+  font-size: 13px;
+}
+
+/* The stage: a 1920x1080 virtual space scaled to fit whatever box holds it. */
+.stage-viewport {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: black;
+}
+.stage-space {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: center;
+  overflow: hidden;
+}
+.stage-node {
+  position: absolute;
+  will-change: transform, opacity;
+}
+.stage-node[data-enter='fade'] {
+  animation: stage-fade 600ms ease-out both;
+}
+.stage-node[data-enter='drift-up'] {
+  animation: stage-drift-up 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.stage-node[data-enter='drift-in'] {
+  animation: stage-drift-in 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.stage-node[data-enter='scale'] {
+  animation: stage-scale 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.stage-node[data-enter='blur-in'] {
+  animation: stage-blur-in 900ms ease-out both;
+}
+@keyframes stage-fade {
+  from { opacity: 0; }
+}
+@keyframes stage-drift-up {
+  from { opacity: 0; translate: 0 24px; }
+}
+@keyframes stage-drift-in {
+  from { opacity: 0; translate: -32px 0; }
+}
+@keyframes stage-scale {
+  from { opacity: 0; scale: 0.92; }
+}
+@keyframes stage-blur-in {
+  from { opacity: 0; filter: blur(14px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-node {
+    animation: none !important;
+  }
+}

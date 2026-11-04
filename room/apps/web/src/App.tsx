@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { HangoutMemory } from '@/components/hangout-memory';
 import { HangoutProject } from '@/components/hangout-project';
 import { ThemeControls } from '@/components/theme-controls';
+import { RoomNav } from '@/components/room-nav';
+import { currentRoom } from '@/lib/rooms';
 import { MaestroDialog } from '@/components/maestro-dialog';
 import { VoiceBand } from '@/components/voice-band';
 import { useAgents } from '@/hooks/use-agents';
@@ -35,7 +37,7 @@ function writePreference(key: string, enabled: boolean) {
   }
 }
 export default function App() {
-  const debate = window.location.pathname.replace(/\/$/, '') === '/debate';
+  const debate = currentRoom() === 'debate';
   useEffect(() => {
     document.title = debate ? 'Arena' : 'The Hangout · Arena';
   }, [debate]);
@@ -45,6 +47,22 @@ export default function App() {
   const [voiceTarget, setVoiceTarget] = useState<VoiceTarget>('room');
   const voices = useVoices(room.runId);
   const voiceQueue = useRef(Promise.resolve());
+  // The last spoken turn's broadcast, so the band can show each seat's real receipt
+  // state instead of a bare "sent". Nothing about delivery is hidden under a rug.
+  const [lastSpoken, setLastSpoken] = useState<{ requestId: string; targets: AgentId[] }>();
+  const deliveries = lastSpoken
+    ? lastSpoken.targets.map((target) => {
+        const receipt = room.agents[target].snapshot.humanMessages.find(
+          (message) => message.requestId === `${lastSpoken.requestId}-${target}`,
+        );
+        return {
+          seat: target,
+          name: modelPanelName(room.agents[target].info?.model, target),
+          status: receipt?.status,
+          error: receipt?.error,
+        };
+      })
+    : [];
   const microphone = useMicrophone(preview, {
     onSpeech: () => {
       // Sid's voice is new information, not a cancellation. Playback continues;
@@ -216,10 +234,9 @@ export default function App() {
       intent: 'queue' as const,
       delivered: new Set<AgentId>(),
     };
+    setLastSpoken({ requestId: batch.requestId, targets });
     const results = await Promise.allSettled(
-      targets.map((target) =>
-        send(target, text, `${batch.requestId}-${target}`, batch, 'queue'),
-      ),
+      targets.map((target) => send(target, text, `${batch.requestId}-${target}`, batch, 'queue')),
     );
     const failure = results.find(
       (result): result is PromiseRejectedResult => result.status === 'rejected',
@@ -266,9 +283,7 @@ export default function App() {
   return (
     <div className="room">
       <header className="room-header">
-        <h1 className="wordmark">
-          arena<span aria-hidden="true">.</span>
-        </h1>
+        <RoomNav current={debate ? 'debate' : 'hangout'} />
         <span className="room-description">
           {debate ? 'A little room for big thoughts.' : 'The hangout'}
         </span>
@@ -360,6 +375,7 @@ export default function App() {
           }}
           target={voiceTarget}
           setTarget={setVoiceTarget}
+          deliveries={deliveries}
           toggleSpeech={toggleSpeech}
           toggleMicrophone={toggleMicrophone}
           conversation={conversationAction}

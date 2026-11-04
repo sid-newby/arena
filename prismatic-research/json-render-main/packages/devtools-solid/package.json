@@ -1,0 +1,61 @@
+{
+  "name": "@json-render/devtools-solid",
+  "version": "0.21.4",
+  "license": "Apache-2.0",
+  "description": "SolidJS adapter for @json-render/devtools. Drop-in <JsonRenderDevtools /> component.",
+  "keywords": [
+    "json",
+    "ui",
+    "solid",
+    "solidjs",
+    "devtools",
+    "inspector",
+    "generative-ui",
+    "debug"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel-labs/json-render.git",
+    "directory": "packages/devtools-solid"
+  },
+  "homepage": "https://json-render.dev",
+  "bugs": {
+    "url": "https://github.com/vercel-labs/json-render/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@json-render/core": "workspace:*",
+    "@json-render/devtools": "workspace:*",
+    "@json-render/solid": "workspace:*"
+  },
+  "devDependencies": {
+    "@internal/typescript-config": "workspace:*",
+    "esbuild-plugin-solid": "^0.6.0",
+    "solid-js": "^1.9.0",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5"
+  },
+  "peerDependencies": {
+    "solid-js": "^1.9.0"
+  }
+}

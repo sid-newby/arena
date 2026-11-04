@@ -41,6 +41,8 @@ records, and provider continuation IDs. Interrupted turns are shown as
 interrupted and do not replay on restart. The app binds to loopback for local
 use.
 
+The header links the three rooms. The hangout is the root, `/debate` is the structured Maestro workflow, and `/prismatic` is the Prismatic Research Center, a placeholder today that will draw its interface from the conversation with json-render.
+
 The separate `/debate` view retains the structured Maestro workflow. Each structured run also retains goal revisions, exact model attribution, available token
 observations, runtime timing, and explicitly reviewed outcomes. Maestro can
 propose an outcome after both candidates finish; confirmation records your

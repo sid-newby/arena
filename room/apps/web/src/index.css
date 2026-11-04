@@ -167,6 +167,7 @@
 .room-description {
   color: var(--muted-foreground);
   font-size: 12px;
+  white-space: nowrap;
 }
 .room-tools {
   margin-left: auto;

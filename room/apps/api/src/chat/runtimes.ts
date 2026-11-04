@@ -4,6 +4,7 @@ import {
   createSdkMcpServer,
   query,
   tool,
+  type HookCallback,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import {
@@ -34,6 +35,32 @@ export async function runAnthropic(
     ? (context.tools ?? []).filter((definition) => definition.name === 'recall_room')
     : (context.tools ?? runtimeTools(role));
   const allowedRoomTools = definitions.map((definition) => `mcp__room__${definition.name}`);
+  const permitted = new Set(
+    side
+      ? allowedRoomTools
+      : [
+          ...allowedRoomTools,
+          'WebSearch',
+          'WebFetch',
+          'mcp__context7__resolve-library-id',
+          'mcp__context7__query-docs',
+        ],
+  );
+  // One gate for every tool call. Allow the room's set by exact name; deny the
+  // rest with a reason the model can read. Replaces the shadowed allowlist.
+  const gate: HookCallback = async (input) => {
+    if (input.hook_event_name !== 'PreToolUse') return {};
+    const allowed = permitted.has(input.tool_name);
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: allowed ? 'allow' : 'deny',
+        ...(allowed
+          ? {}
+          : { permissionDecisionReason: `${input.tool_name} is outside the permitted room tools.` }),
+      },
+    };
+  };
   const server = createSdkMcpServer({
     name: 'room',
     version: '2.0.0',
@@ -103,15 +130,12 @@ export async function runAnthropic(
         : { room: server, context7: { type: 'http', url: 'https://mcp.context7.com/mcp' } },
       strictMcpConfig: true,
       settingSources: [],
-      allowedTools: side
-        ? allowedRoomTools
-        : [
-            ...allowedRoomTools,
-            'WebSearch',
-            'WebFetch',
-            'mcp__context7__resolve-library-id',
-            'mcp__context7__query-docs',
-          ],
+      // No bare allowlist: a bare entry auto-approves the tool before any check
+      // runs and the SDK warns that canUseTool is shadowed. Every call goes
+      // through the PreToolUse gate below instead; canUseTool is the last word
+      // for anything that somehow reaches it.
+      allowedTools: [],
+      hooks: { PreToolUse: [{ hooks: [gate] }] },
       permissionMode: 'dontAsk',
       canUseTool: async () => ({
         behavior: 'deny',

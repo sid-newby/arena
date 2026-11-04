@@ -1,0 +1,106 @@
+import { convertToModelMessages, stepCountIs, streamText } from "ai";
+import type { ModelMessage, UIMessage } from "ai";
+import { createBashTool } from "bash-tool";
+import { headers } from "next/headers";
+import { loadAllDocsSources } from "@/lib/docs-source";
+import { minuteRateLimit, dailyRateLimit } from "@/lib/rate-limit";
+
+export const maxDuration = 60;
+
+const DEFAULT_MODEL = "anthropic/claude-haiku-4.5";
+
+const SYSTEM_PROMPT = `You are a helpful documentation assistant for json-render, a library for AI-generated UI with guardrails.
+
+GitHub repository: https://github.com/vercel-labs/json-render
+Documentation: https://json-render.dev/docs
+npm packages: @json-render/core, @json-render/react, @json-render/next, @json-render/tanstack-start, @json-render/ink, @json-render/vue, @json-render/svelte, @json-render/solid, @json-render/shadcn, @json-render/shadcn-svelte, @json-render/react-three-fiber, @json-render/react-native, @json-render/react-email, @json-render/react-pdf, @json-render/image, @json-render/remotion, @json-render/directives, @json-render/codegen, @json-render/devtools, @json-render/devtools-react, @json-render/devtools-vue, @json-render/devtools-svelte, @json-render/devtools-solid, @json-render/mcp, @json-render/redux, @json-render/zustand, @json-render/jotai, @json-render/xstate, @json-render/yaml
+Skills: json-render ships AI agent skills that teach coding agents how to use each package. Install with "npx skills add vercel-labs/json-render --skill <name>". Available skills: core, react, next, tanstack-start, ink, react-pdf, react-email, react-native, json-render-shadcn, shadcn-svelte, react-three-fiber, image, remotion, vue, svelte, solid, directives, codegen, devtools, devtools-react, devtools-vue, devtools-svelte, devtools-solid, mcp, redux, zustand, jotai, xstate, yaml. See /docs/skills for details.
+
+Experimental Jev composition: core exports experimental_composeSpec and experimental_createEvaluator for app-owned catalogs/candidates through Vercel AI Gateway. Available since v0.21.0. See /docs/jev for installation and limits.
+
+You have access to the full json-render documentation via the bash and readFile tools. The docs are available as markdown files in the /workspace/docs/ directory.
+
+When answering questions:
+- Use the bash tool to list files (ls /workspace/docs/) or search for content (grep -r "keyword" /workspace/docs/)
+- Use the readFile tool to read specific documentation pages (e.g. readFile with path "/workspace/docs/index.md")
+- Do NOT use bash to write, create, modify, or delete files (no tee, cat >, sed -i, echo >, cp, mv, rm, mkdir, touch, etc.) — you are read-only
+- Always base your answers on the actual documentation content
+- Be concise and accurate
+- If the docs don't cover a topic, say so honestly
+- Do NOT include source references or file paths in your response
+- Do NOT use emojis in your responses`;
+
+async function loadDocsFiles(): Promise<Record<string, string>> {
+  const pages = await loadAllDocsSources();
+  return Object.fromEntries(
+    pages.map((page) => [
+      page.href === "/docs" ? "/docs/index.md" : `${page.href}.md`,
+      page.markdown,
+    ]),
+  );
+}
+
+function addCacheControl(messages: ModelMessage[]): ModelMessage[] {
+  if (messages.length === 0) return messages;
+  return messages.map((message, index) => {
+    if (index === messages.length - 1) {
+      return {
+        ...message,
+        providerOptions: {
+          ...message.providerOptions,
+          anthropic: { cacheControl: { type: "ephemeral" } },
+        },
+      };
+    }
+    return message;
+  });
+}
+
+export async function POST(req: Request) {
+  const headersList = await headers();
+  const ip = headersList.get("x-forwarded-for")?.split(",")[0] ?? "anonymous";
+
+  const [minuteResult, dailyResult] = await Promise.all([
+    minuteRateLimit.limit(ip),
+    dailyRateLimit.limit(ip),
+  ]);
+
+  if (!minuteResult.success || !dailyResult.success) {
+    const isMinuteLimit = !minuteResult.success;
+    return new Response(
+      JSON.stringify({
+        error: "Rate limit exceeded",
+        message: isMinuteLimit
+          ? "Too many requests. Please wait a moment before trying again."
+          : "Daily limit reached. Please try again tomorrow.",
+      }),
+      {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  const { messages }: { messages: UIMessage[] } = await req.json();
+
+  const docsFiles = await loadDocsFiles();
+  const {
+    tools: { bash, readFile },
+  } = await createBashTool({ files: docsFiles });
+
+  const result = streamText({
+    model: DEFAULT_MODEL,
+    system: SYSTEM_PROMPT,
+    messages: await convertToModelMessages(messages),
+    stopWhen: stepCountIs(5),
+    tools: {
+      bash,
+      readFile,
+    },
+    prepareStep: ({ messages: stepMessages }) => ({
+      messages: addCacheControl(stepMessages),
+    }),
+  });
+
+  return result.toUIMessageStreamResponse();
+}

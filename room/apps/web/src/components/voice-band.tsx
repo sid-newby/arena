@@ -6,11 +6,45 @@ import type { useVoices } from '@/hooks/use-voices';
 import { useState } from 'react';
 import { agentIds, type AgentId } from '@/lib/agents';
 import type { VoiceTarget } from '@/lib/microphone';
+import type { MessageReceipt } from '@/lib/messaging';
 import './voice-band.css';
 
 type Conversation =
   | { status: 'idle' | 'stopping' | 'stopped' }
   | { status: 'error'; message: string };
+
+/** One seat's receipt for Sid's last spoken turn. `status` is absent until the room records it. */
+export type SpokenDelivery = {
+  seat: AgentId;
+  name: string;
+  status?: MessageReceipt['status'];
+  error?: string;
+};
+
+/** Honest, per-seat wording for each real receipt state. Nothing here is a euphemism. */
+function deliveryLabel(delivery: SpokenDelivery): { text: string; trouble: boolean } {
+  const { name, status, error } = delivery;
+  switch (status) {
+    case undefined:
+      return { text: `${name} · sending`, trouble: false };
+    case 'queued':
+      return { text: `${name} · waiting for their reply to end`, trouble: false };
+    case 'dispatching':
+      return { text: `${name} · reaching them`, trouble: false };
+    case 'running':
+      return { text: `${name} · heard it`, trouble: false };
+    case 'completed':
+      return { text: `${name} · replied`, trouble: false };
+    case 'stopped':
+      return { text: `${name} · reply stopped`, trouble: true };
+    case 'cancelled':
+      return { text: `${name} · cancelled`, trouble: true };
+    case 'uncertain':
+      return { text: `${name} · delivery unconfirmed`, trouble: true };
+    case 'failed':
+      return { text: `${name} · failed${error ? ` — ${error}` : ''}`, trouble: true };
+  }
+}
 
 export function VoiceBand({
   speech,
@@ -21,6 +55,7 @@ export function VoiceBand({
   names,
   target,
   setTarget,
+  deliveries = [],
   toggleSpeech,
   toggleMicrophone,
   conversation,
@@ -39,6 +74,7 @@ export function VoiceBand({
   names: Record<AgentId, string>;
   target: VoiceTarget;
   setTarget: (target: VoiceTarget) => void;
+  deliveries?: SpokenDelivery[];
   toggleSpeech: () => void;
   toggleMicrophone: () => void;
   conversation: Conversation;
@@ -179,6 +215,23 @@ export function VoiceBand({
           <span className="you-said-text">
             “{(microphone.lastIgnored ?? microphone.lastSent)!.text}”
           </span>
+          {!microphone.lastIgnored && deliveries.length > 0 && (
+            <span className="you-said-receipts" aria-label="Delivery by seat">
+              {deliveries.map((delivery) => {
+                const label = deliveryLabel(delivery);
+                return (
+                  <span
+                    key={delivery.seat}
+                    className="you-said-receipt"
+                    data-trouble={label.trouble || undefined}
+                    title={delivery.error}
+                  >
+                    {label.text}
+                  </span>
+                );
+              })}
+            </span>
+          )}
         </output>
       )}
       <details className="band-more">

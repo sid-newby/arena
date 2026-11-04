@@ -133,6 +133,8 @@ export class ChatService implements OnModuleDestroy {
       stopEpochs: new Map(),
       seatStopEpochs: new Map(),
       listeners: new Map(),
+      emitTimers: new Map(),
+      emitLast: new Map(),
       expressionRuns: new Map(),
       runtimeCache: new Map(),
       projectTools: new LiveProjectTools(),
@@ -521,9 +523,39 @@ export class ChatService implements OnModuleDestroy {
       };
     });
   }
+  /**
+   * Snapshots are whole-panel documents, and streaming text asks for one per
+   * token. Pushed unthrottled they outrun the browser, Nest's SSE buffer hits
+   * its 4 MiB ceiling, and the stream is dropped mid-reply. Coalesce per seat:
+   * the first change goes out at once, later ones inside the window collapse
+   * into a single trailing send carrying the latest state.
+   */
+  private static readonly EMIT_WINDOW_MS = 100;
+  private readonly emitTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly emitLast = new Map<string, number>();
   private emit(agent: AgentId, runId = this.store.runs.currentId()) {
+    const key = this.key(agent, runId);
+    if (this.emitTimers.has(key)) return;
+    const since = Date.now() - (this.emitLast.get(key) ?? 0);
+    if (since >= ChatService.EMIT_WINDOW_MS) {
+      this.emitNow(agent, runId);
+      return;
+    }
+    this.emitTimers.set(
+      key,
+      setTimeout(() => {
+        this.emitTimers.delete(key);
+        if (!this.destroyed) this.emitNow(agent, runId);
+      }, ChatService.EMIT_WINDOW_MS - since),
+    );
+  }
+  private emitNow(agent: AgentId, runId: string) {
+    const key = this.key(agent, runId);
+    this.emitLast.set(key, Date.now());
+    const listeners = this.listeners.get(key);
+    if (!listeners?.size) return;
     const snapshot = this.snapshot(agent, runId);
-    this.listeners.get(this.key(agent, runId))?.forEach((send) => send(snapshot));
+    listeners.forEach((send) => send(snapshot));
   }
   submit(agent: AgentId, body: unknown, runId = this.store.runs.currentId()) {
     if (runId === HANGOUT_ID)
@@ -1172,6 +1204,8 @@ export class ChatService implements OnModuleDestroy {
     if (this.destroyed) return;
     this.destroyed = true;
     this.unsubscribeCommits?.();
+    for (const timer of this.emitTimers.values()) clearTimeout(timer);
+    this.emitTimers.clear();
     await this.sideService?.close();
     const active = [...this.active.values()];
     active.forEach((turn) => turn.controller.abort());

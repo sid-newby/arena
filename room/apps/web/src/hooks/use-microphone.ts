@@ -13,6 +13,13 @@ import {
   wordCount,
 } from '@/lib/microphone';
 
+/**
+ * Ink ends a turn on a breath. Hold the transcript this long before sending so a
+ * resumed sentence merges into the same message instead of arriving in halves.
+ * Sid chose this on 2026-11-04. One number to tune if it feels slow or eager.
+ */
+export const TURN_HOLD_MS = 700;
+
 type Capture = {
   stream: MediaStream;
   context: AudioContext;
@@ -21,6 +28,11 @@ type Capture = {
   closed: boolean;
   attempts: number;
   turnDuringPlayback: boolean;
+  /**
+   * A finished turn waiting out the hold window, in case Sid keeps going. While
+   * he is speaking again the timer is absent and the text waits for the next end.
+   */
+  held?: { text: string; timer?: ReturnType<typeof setTimeout> };
 };
 
 export type MicrophoneCallbacks = {
@@ -62,6 +74,14 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
     capture.current = undefined;
     if (!current) return;
     current.closed = true;
+    // Don't let turning the mic off eat a sentence that was only waiting out the hold.
+    if (current.held) {
+      clearTimeout(current.held.timer);
+      const { text } = current.held;
+      current.held = undefined;
+      setLastSent({ text, at: Date.now() });
+      latest.current.onTranscript(text);
+    }
     current.socket?.close(1000, 'Microphone off');
     for (const track of current.stream.getTracks()) track.stop();
     void current.context.close().catch(() => {});
@@ -127,15 +147,22 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
           setError(undefined);
           setStatus('Listening · speak any time');
           return;
-        case 'turn.start':
-          current.turnDuringPlayback = latest.current.playing?.() ?? false;
+        case 'turn.start': {
+          // Sid kept going inside the hold window: this is the same sentence.
+          const resumed = current.held;
+          if (resumed) {
+            clearTimeout(resumed.timer);
+            current.held = { text: resumed.text };
+          } else current.turnDuringPlayback = latest.current.playing?.() ?? false;
           setListening(true);
-          setInterim('');
+          setInterim(resumed ? `${resumed.text} ` : '');
           setStatus('Hearing you…');
           return;
+        }
         case 'turn.update': {
           setListening(true);
-          setInterim(event.transcript);
+          const prefix = current.held ? `${current.held.text} ` : '';
+          setInterim(prefix + event.transcript);
           const echo =
             current.turnDuringPlayback &&
             looksLikeEcho(event.transcript, latest.current.spoken?.() ?? []);
@@ -144,23 +171,40 @@ export function useMicrophone(preview: boolean, callbacks: MicrophoneCallbacks) 
         }
         case 'turn.end': {
           setListening(false);
-          setInterim('');
-          const text = transcriptReady(event.transcript);
+          const piece = transcriptReady(event.transcript);
+          const previous = current.held?.text;
+          if (current.held) clearTimeout(current.held.timer);
+          current.held = undefined;
+          const text = [previous, piece].filter(Boolean).join(' ');
+          if (!text) {
+            setInterim('');
+            setStatus('Listening · speak any time');
+            return;
+          }
           if (
-            text &&
             current.turnDuringPlayback &&
             looksLikeEcho(text, latest.current.spoken?.() ?? [])
           ) {
+            setInterim('');
             setLastIgnored({ text, at: Date.now() });
             setStatus('Ignored playback echo · listening');
             return;
           }
-          if (text) {
-            setLastSent({ text, at: Date.now() });
-            setLastIgnored(undefined);
-            setStatus('Sent · listening');
-            latest.current.onTranscript(text);
-          } else setStatus('Listening · speak any time');
+          // Hold before sending. A new turn.start inside the window merges into this text.
+          setInterim(text);
+          setStatus('Pausing… keep talking to add, or wait to send');
+          current.held = {
+            text,
+            timer: setTimeout(() => {
+              if (current.closed || current.held?.text !== text) return;
+              current.held = undefined;
+              setInterim('');
+              setLastSent({ text, at: Date.now() });
+              setLastIgnored(undefined);
+              setStatus('Sent · listening');
+              latest.current.onTranscript(text);
+            }, TURN_HOLD_MS),
+          };
           return;
         }
         case 'error':

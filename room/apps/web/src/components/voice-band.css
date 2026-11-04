@@ -108,6 +108,26 @@
 .you-said[data-ignored] .you-said-label {
   color: var(--destructive);
 }
+/* Per-seat receipt for the last spoken turn. Trouble states are never muted. */
+.you-said-receipts {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+  margin-left: 4px;
+}
+.you-said-receipt {
+  padding: 1px 6px;
+  font-size: 9px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  border: 1px solid color-mix(in oklch, var(--border), transparent 20%);
+  white-space: nowrap;
+}
+.you-said-receipt[data-trouble] {
+  color: var(--destructive);
+  border-color: color-mix(in oklch, var(--destructive), transparent 40%);
+}
 .band-more {
   position: relative;
   flex-shrink: 0;

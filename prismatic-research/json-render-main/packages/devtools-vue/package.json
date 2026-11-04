@@ -1,0 +1,59 @@
+{
+  "name": "@json-render/devtools-vue",
+  "version": "0.21.4",
+  "license": "Apache-2.0",
+  "description": "Vue adapter for @json-render/devtools. Drop-in <JsonRenderDevtools /> component.",
+  "keywords": [
+    "json",
+    "ui",
+    "vue",
+    "devtools",
+    "inspector",
+    "generative-ui",
+    "debug"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vercel-labs/json-render.git",
+    "directory": "packages/devtools-vue"
+  },
+  "homepage": "https://json-render.dev",
+  "bugs": {
+    "url": "https://github.com/vercel-labs/json-render/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@json-render/core": "workspace:*",
+    "@json-render/devtools": "workspace:*",
+    "@json-render/vue": "workspace:*"
+  },
+  "devDependencies": {
+    "@internal/typescript-config": "workspace:*",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5",
+    "vue": "^3.5.0"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0"
+  }
+}

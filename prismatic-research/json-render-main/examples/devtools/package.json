@@ -1,0 +1,35 @@
+{
+  "name": "example-devtools",
+  "version": "0.17.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\nSee: https://github.com/vercel-labs/portless\\n' && exit 1)",
+    "dev": "portless devtools-demo.json-render next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint --max-warnings 0",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^3.0.104",
+    "@ai-sdk/react": "^3.0.170",
+    "@json-render/core": "workspace:*",
+    "@json-render/devtools": "workspace:*",
+    "@json-render/devtools-react": "workspace:*",
+    "@json-render/react": "workspace:*",
+    "ai": "^6.0.168",
+    "next": "^16.2.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@internal/eslint-config": "workspace:*",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.3",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.1",
+    "typescript": "^5.7.2"
+  }
+}
